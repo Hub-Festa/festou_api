@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\Jobs\RemoveMapPoiByReferenceJob;
+use App\Jobs\UpsertMapPoiForAccountProfileJob;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountProfile;
 use Illuminate\Support\Facades\DB;
@@ -47,7 +50,7 @@ class AccountProfileManagementService
         }
 
         try {
-            return DB::connection('tenant')->transaction(function () use ($payload): AccountProfile {
+            $profile = DB::connection('tenant')->transaction(function () use ($payload): AccountProfile {
                 if (! array_key_exists('is_active', $payload)) {
                     $payload['is_active'] = true;
                 }
@@ -56,6 +59,10 @@ class AccountProfileManagementService
 
                 return AccountProfile::create($payload)->fresh();
             });
+
+            $this->dispatchMapPoiUpsert($profile);
+
+            return $profile;
         } catch (BulkWriteException $exception) {
             if (str_contains($exception->getMessage(), 'E11000')) {
                 throw ValidationException::withMessages([
@@ -103,24 +110,39 @@ class AccountProfileManagementService
         $profile->fill($attributes);
         $profile->save();
 
-        return $profile->fresh();
+        $fresh = $profile->fresh();
+
+        if ($fresh) {
+            $this->dispatchMapPoiUpsert($fresh);
+        }
+
+        return $fresh ?? $profile;
     }
 
     public function delete(AccountProfile $profile): void
     {
         $profile->delete();
+
+        $this->dispatchMapPoiRemove((string) $profile->_id);
     }
 
     public function restore(AccountProfile $profile): AccountProfile
     {
         $profile->restore();
 
-        return $profile->fresh();
+        $fresh = $profile->fresh();
+        if ($fresh) {
+            $this->dispatchMapPoiUpsert($fresh);
+        }
+
+        return $fresh ?? $profile;
     }
 
     public function forceDelete(AccountProfile $profile): void
     {
         $profile->forceDelete();
+
+        $this->dispatchMapPoiRemove((string) $profile->_id);
     }
 
     /**
@@ -144,5 +166,25 @@ class AccountProfileManagementService
             'type' => 'Point',
             'coordinates' => [(float) $lng, (float) $lat],
         ];
+    }
+
+    private function dispatchMapPoiUpsert(AccountProfile $profile): void
+    {
+        $tenant = Tenant::current();
+        if (! $tenant) {
+            return;
+        }
+
+        UpsertMapPoiForAccountProfileJob::dispatchSync((string) $tenant->_id, (string) $profile->_id);
+    }
+
+    private function dispatchMapPoiRemove(string $profileId): void
+    {
+        $tenant = Tenant::current();
+        if (! $tenant) {
+            return;
+        }
+
+        RemoveMapPoiByReferenceJob::dispatchSync((string) $tenant->_id, 'account_profile', $profileId);
     }
 }

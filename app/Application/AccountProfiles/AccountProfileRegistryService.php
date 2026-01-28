@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\DataObjects\Settings\ProfileTypeRegistrySettings;
 use App\Models\Tenants\TenantSettings;
 
 class AccountProfileRegistryService
@@ -13,7 +14,9 @@ class AccountProfileRegistryService
      */
     public function registry(): array
     {
-        return TenantSettings::current()?->profile_type_registry ?? [];
+        return ProfileTypeRegistrySettings::fromValue(
+            TenantSettings::current()?->getAttribute('profile_type_registry')
+        )->toArray();
     }
 
     /**

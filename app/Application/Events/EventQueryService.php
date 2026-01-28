@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Events;
 
+use App\DataObjects\Settings\MapUiSettings;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\Event;
@@ -549,29 +550,13 @@ class EventQueryService
     private function resolveRadiusSettings(): array
     {
         $settings = TenantSettings::current();
-        $mapUi = $settings?->getAttribute('map_ui') ?? [];
-        $radius = is_array($mapUi) ? ($mapUi['radius'] ?? []) : [];
-        $radius = is_array($radius) ? $radius : [];
+        $mapUi = MapUiSettings::fromValue($settings?->getAttribute('map_ui'));
 
-        $min = isset($radius['min_km']) ? (float) $radius['min_km'] : self::DEFAULT_RADIUS_MIN_KM;
-        $default = isset($radius['default_km']) ? (float) $radius['default_km'] : self::DEFAULT_RADIUS_KM;
-        $max = isset($radius['max_km']) ? (float) $radius['max_km'] : self::DEFAULT_RADIUS_MAX_KM;
-
-        if ($min <= 0) {
-            $min = self::DEFAULT_RADIUS_MIN_KM;
-        }
-        if ($max <= 0) {
-            $max = self::DEFAULT_RADIUS_MAX_KM;
-        }
-        if ($default <= 0) {
-            $default = self::DEFAULT_RADIUS_KM;
-        }
-
-        return [
-            'min_km' => $min,
-            'default_km' => min(max($default, $min), $max),
-            'max_km' => $max,
-        ];
+        return $mapUi->radius->resolveWithDefaults(
+            self::DEFAULT_RADIUS_MIN_KM,
+            self::DEFAULT_RADIUS_KM,
+            self::DEFAULT_RADIUS_MAX_KM
+        );
     }
 
     private function parseSince(?string $value): ?Carbon

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\AccountProfiles;
 
+use App\DataObjects\Settings\ProfileTypeRegistrySettings;
 use App\Models\Tenants\TenantSettings;
 
 class AccountProfileRegistrySeeder
@@ -41,13 +42,33 @@ class AccountProfileRegistrySeeder
                     'is_poi_enabled' => true,
                 ],
             ],
+            [
+                'type' => 'restaurant',
+                'label' => 'Restaurant',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ],
+            [
+                'type' => 'experience_provider',
+                'label' => 'Experience Provider',
+                'allowed_taxonomies' => [],
+                'capabilities' => [
+                    'is_favoritable' => true,
+                    'is_poi_enabled' => true,
+                ],
+            ],
         ];
     }
 
     public function ensureDefaults(): void
     {
         $settings = TenantSettings::current();
-        $registry = $settings?->profile_type_registry ?? [];
+        $registry = ProfileTypeRegistrySettings::fromValue(
+            $settings?->getAttribute('profile_type_registry')
+        )->toArray();
 
         $types = collect($registry)
             ->map(static fn (array $entry): ?string => $entry['type'] ?? null)

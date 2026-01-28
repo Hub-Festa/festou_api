@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application\Events;
 
+use App\Jobs\RemoveMapPoiByReferenceJob;
+use App\Jobs\UpsertMapPoiForEventJob;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\Event;
 use Illuminate\Support\Carbon;
@@ -17,11 +20,15 @@ class EventManagementService
      */
     public function create(array $payload): Event
     {
-        return DB::connection('tenant')->transaction(function () use ($payload): Event {
+        $event = DB::connection('tenant')->transaction(function () use ($payload): Event {
             $normalized = $this->normalizePayload($payload, null);
 
             return Event::create($normalized)->fresh();
         });
+
+        $this->dispatchMapPoiUpsert($event);
+
+        return $event;
     }
 
     /**
@@ -34,12 +41,19 @@ class EventManagementService
         $event->fill($normalized);
         $event->save();
 
-        return $event->fresh();
+        $fresh = $event->fresh();
+        if ($fresh) {
+            $this->dispatchMapPoiUpsert($fresh);
+        }
+
+        return $fresh ?? $event;
     }
 
     public function delete(Event $event): void
     {
         $event->delete();
+
+        $this->dispatchMapPoiRemove((string) $event->_id);
     }
 
     /**
@@ -271,5 +285,25 @@ class EventManagementService
         }
 
         return null;
+    }
+
+    private function dispatchMapPoiUpsert(Event $event): void
+    {
+        $tenant = Tenant::current();
+        if (! $tenant) {
+            return;
+        }
+
+        UpsertMapPoiForEventJob::dispatchSync((string) $tenant->_id, (string) $event->_id);
+    }
+
+    private function dispatchMapPoiRemove(string $eventId): void
+    {
+        $tenant = Tenant::current();
+        if (! $tenant) {
+            return;
+        }
+
+        RemoveMapPoiByReferenceJob::dispatchSync((string) $tenant->_id, 'event', $eventId);
     }
 }

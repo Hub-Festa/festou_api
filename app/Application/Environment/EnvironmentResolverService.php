@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\DataObjects\Settings\MapUiSettings;
+use App\DataObjects\Settings\ProfileTypeRegistrySettings;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantSettings;
@@ -51,17 +53,10 @@ class EnvironmentResolverService
         $landlord = Landlord::singleton();
         $pushSettings = TenantPushSettings::current();
         $settings = TenantSettings::current();
-        $profileTypes = $settings?->getAttribute('profile_type_registry') ?? [];
-        if ($profileTypes instanceof \MongoDB\Model\BSONDocument || $profileTypes instanceof \MongoDB\Model\BSONArray) {
-            $profileTypes = $profileTypes->getArrayCopy();
-        } elseif ($profileTypes instanceof \Traversable) {
-            $profileTypes = iterator_to_array($profileTypes);
-        } elseif (is_object($profileTypes)) {
-            $profileTypes = (array) $profileTypes;
-        }
-        if (! is_array($profileTypes)) {
-            $profileTypes = [];
-        }
+        $profileTypes = ProfileTypeRegistrySettings::fromValue(
+            $settings?->getAttribute('profile_type_registry')
+        )->toArray();
+        $mapUi = MapUiSettings::fromValue($settings?->getAttribute('map_ui'));
         $branding = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
             mainArray: $landlord->branding_data,
             overrideArray: $tenant->branding_data ?? []
@@ -97,7 +92,7 @@ class EnvironmentResolverService
             'push' => $pushSettings?->getAttribute('push') ?? [],
             'profile_types' => array_values($profileTypes),
             'settings' => [
-                'map_ui' => $settings?->getAttribute('map_ui') ?? [],
+                'map_ui' => $mapUi->toArray(),
             ],
         ];
     }
