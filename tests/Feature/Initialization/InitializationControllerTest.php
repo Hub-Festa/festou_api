@@ -56,7 +56,7 @@ class InitializationControllerTest extends TestCase
     {
         return [
             'landlord' => [
-                'name' => 'Belluga HQ',
+                'name' => 'Platform HQ',
             ],
             'user' => [
                 'name' => 'Admin Test',
@@ -64,10 +64,10 @@ class InitializationControllerTest extends TestCase
                 'password' => 'secret123',
             ],
             'tenant' => [
-                'name' => 'Belluga Solutions Test',
-                'subdomain' => 'belluga-test',
+                'name' => 'Platform Tenant Test',
+                'subdomain' => 'platform-test',
                 'domains' => [
-                    'tenant.belluga.test',
+                    'tenant.platform.test',
                 ],
             ],
             'role' => [

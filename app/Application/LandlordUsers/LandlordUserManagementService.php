@@ -51,8 +51,6 @@ class LandlordUserManagementService
     {
         $user = $this->creator->create($payload, $roleId, $operatorId);
 
-        $this->cleanupLegacyCrossTenantUsers();
-
         return $user->fresh();
     }
 
@@ -146,23 +144,5 @@ class LandlordUserManagementService
         }
 
         return $query;
-    }
-
-    private function cleanupLegacyCrossTenantUsers(): void
-    {
-        $legacyEmails = [
-            'cross-admin@belluga.test',
-            'cross-visitor@belluga.test',
-        ];
-
-        foreach ($legacyEmails as $email) {
-            LandlordUser::withTrashed()
-                ->whereNull('role_id')
-                ->where('emails', 'all', [$email])
-                ->get()
-                ->each(static function (LandlordUser $user): void {
-                    $user->forceDelete();
-                });
-        }
     }
 }

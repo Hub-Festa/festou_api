@@ -6,7 +6,7 @@ namespace App\Application\Environment;
 
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Shared\PushHandler\Models\Tenants\TenantPushSettings;
 use App\Support\Helpers\ArrayReplaceEmptyAware;
 use Illuminate\Support\Str;
 

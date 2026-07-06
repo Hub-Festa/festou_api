@@ -12,22 +12,22 @@ use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
-use Belluga\PushHandler\Models\Tenants\PushMessage;
-use Belluga\PushHandler\Models\Tenants\PushCredential;
-use Belluga\PushHandler\Models\Tenants\PushDeliveryLog;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
-use Belluga\PushHandler\Services\FcmHttpV1Client;
-use Belluga\PushHandler\Contracts\FcmClientContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyDecisionContract;
+use Shared\PushHandler\Models\Tenants\PushMessage;
+use Shared\PushHandler\Models\Tenants\PushCredential;
+use Shared\PushHandler\Models\Tenants\PushDeliveryLog;
+use Shared\PushHandler\Models\Tenants\TenantPushSettings;
+use Shared\PushHandler\Services\FcmHttpV1Client;
+use Shared\PushHandler\Contracts\FcmClientContract;
+use Shared\PushHandler\Contracts\PushPlanPolicyDecisionContract;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Laravel\Sanctum\Sanctum;
-use Belluga\PushHandler\Jobs\SendPushMessageJob;
-use Belluga\PushHandler\Contracts\PushAudienceEligibilityContract;
-use Belluga\PushHandler\Contracts\PushPlanPolicyContract;
-use Belluga\PushHandler\Services\PushDeliveryService;
+use Shared\PushHandler\Jobs\SendPushMessageJob;
+use Shared\PushHandler\Contracts\PushAudienceEligibilityContract;
+use Shared\PushHandler\Contracts\PushPlanPolicyContract;
+use Shared\PushHandler\Services\PushDeliveryService;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -140,7 +140,7 @@ class PushMessageFlowTest extends TestCase
 
         $message = PushMessage::query()->where('internal_name', $payload['internal_name'])->first();
         $this->assertNotNull($message);
-        $this->assertSame((string) $this->account->_id, (string) $message->partner_id);
+        $this->assertSame((string) $this->account->_id, (string) $message->account_id);
         $messageId = (string) $message->_id;
 
         $this->withServerVariables([
@@ -1462,7 +1462,7 @@ class PushMessageFlowTest extends TestCase
 
     public function testDeliveryServiceBatchesTokensByConfig(): void
     {
-        config(['belluga_push_handler.fcm.max_batch_size' => 500]);
+        config(['shared_push_handler.fcm.max_batch_size' => 500]);
 
         $batches = [];
         $this->app->bind(FcmClientContract::class, function () use (&$batches) {
@@ -1524,8 +1524,8 @@ class PushMessageFlowTest extends TestCase
             };
         });
 
-        $this->app->bind(\Belluga\PushHandler\Services\PushRecipientResolver::class, static function () {
-            return new class extends \Belluga\PushHandler\Services\PushRecipientResolver {
+        $this->app->bind(\Shared\PushHandler\Services\PushRecipientResolver::class, static function () {
+            return new class extends \Shared\PushHandler\Services\PushRecipientResolver {
                 public function __construct()
                 {
                 }
@@ -1539,13 +1539,13 @@ class PushMessageFlowTest extends TestCase
 
         $message = PushMessage::create(array_replace($this->buildPayload(), [
             'scope' => 'account',
-            'partner_id' => (string) $this->account->_id,
+            'account_id' => (string) $this->account->_id,
         ]));
 
         $job = new SendPushMessageJob((string) $message->_id, 'account', (string) $this->account->_id);
         $job->handle(
             $this->app->make(PushDeliveryService::class),
-            $this->app->make(\Belluga\PushHandler\Services\PushRecipientResolver::class)
+            $this->app->make(\Shared\PushHandler\Services\PushRecipientResolver::class)
         );
 
         $message->refresh();

@@ -3,7 +3,7 @@
 namespace Tests\Api\v1\Tenants\Branding;
 
 use App\Models\Landlord\Tenant;
-use Belluga\PushHandler\Models\Tenants\TenantPushSettings;
+use Shared\PushHandler\Models\Tenants\TenantPushSettings;
 use Tests\TestCaseTenant;
 use Tests\Helpers\TenantLabels;
 

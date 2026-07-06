@@ -1,17 +1,19 @@
 <?php
 
 use App\Http\Api\v1\Controllers\AccountController;
-use App\Http\Api\v1\Controllers\TenantAppDomainController;
 use App\Http\Api\v1\Controllers\DomainController;
 use App\Http\Api\v1\Controllers\LandlordUserController;
+use App\Http\Api\v1\Controllers\TaxonomiesController;
+use App\Http\Api\v1\Controllers\TaxonomyTermsController;
+use App\Http\Api\v1\Controllers\TenantAppDomainController;
+use App\Http\Api\v1\Controllers\TenantBrandingController;
 use App\Http\Api\v1\Controllers\TenantRolesController;
 use App\Http\Api\v1\Controllers\TenantUsersController;
-use App\Http\Api\v1\Controllers\TenantBrandingController;
 use App\Http\Middleware\CheckTenantAccess;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('domains')
-    ->group(function (){
+    ->group(function () {
         Route::post('/', [DomainController::class, 'store']);
 
         Route::delete('/{domain_id}', [DomainController::class, 'destroy']);
@@ -19,10 +21,10 @@ Route::prefix('domains')
         Route::post('/{domain_id}/restore', [DomainController::class, 'restore']);
 
         Route::delete('/{domain_id}/force-delete', [DomainController::class, 'forceDestroy']);
-});
+    });
 
 Route::prefix('appdomains')
-    ->group(function (){
+    ->group(function () {
         Route::get('/', [TenantAppDomainController::class, 'index']);
         Route::post('/', [TenantAppDomainController::class, 'store']);
         Route::delete('/', [TenantAppDomainController::class, 'destroy']);
@@ -35,18 +37,15 @@ Route::get('/check', function () {
 
 Route::prefix('tenant-users')
     ->group(function () {
-
         Route::post('/', [LandlordUserController::class, 'tenantUserManage'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-users:create,tenant-users:update']);
 
         Route::delete('/', [LandlordUserController::class, 'tenantUserManage'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-users:delete']);
-
     });
 
-    Route::prefix('users')
+Route::prefix('users')
     ->group(function () {
-
         Route::get('/', [TenantUsersController::class, 'index'])
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
 
@@ -57,11 +56,10 @@ Route::prefix('tenant-users')
             ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
 
         Route::post('/{user_id}/restore', [TenantUsersController::class, 'restore'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, "abilities:account-users:create,account-users:update,account-users:delete"]);
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create,account-users:update,account-users:delete']);
 
         Route::delete('/{user_id}/force_destroy', [TenantUsersController::class, 'forceDestroy'])
-            ->middleware(['auth:sanctum', CheckTenantAccess::class, "abilities:account-users:delete"]);
-
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
     });
 
 Route::prefix('accounts')
@@ -88,6 +86,33 @@ Route::prefix('accounts')
             });
     });
 
+Route::get('/taxonomies', [TaxonomiesController::class, 'index'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+Route::post('/taxonomies', [TaxonomiesController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+Route::patch('/taxonomies/{taxonomy_id}', [TaxonomiesController::class, 'update'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::delete('/taxonomies/{taxonomy_id}', [TaxonomiesController::class, 'destroy'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
+Route::get('/taxonomies/terms', [TaxonomyTermsController::class, 'batch'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+Route::get('/taxonomies/{taxonomy_id}/terms', [TaxonomyTermsController::class, 'index'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:view']);
+
+Route::post('/taxonomies/{taxonomy_id}/terms', [TaxonomyTermsController::class, 'store'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:create']);
+
+Route::patch('/taxonomies/{taxonomy_id}/terms/{term_id}', [TaxonomyTermsController::class, 'update'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:update']);
+
+Route::delete('/taxonomies/{taxonomy_id}/terms/{term_id}', [TaxonomyTermsController::class, 'destroy'])
+    ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:account-users:delete']);
+
 Route::prefix('roles')->group(function () {
     Route::get('/', [TenantRolesController::class, 'index'])
         ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-roles:view']);
@@ -112,8 +137,6 @@ Route::prefix('roles')->group(function () {
 });
 
 Route::prefix('branding')->group(function () {
-
     Route::post('/update', [TenantBrandingController::class, 'update'])
         ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-branding:update']);
-
 });

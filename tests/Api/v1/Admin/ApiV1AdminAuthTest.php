@@ -153,7 +153,7 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         $password = 'SecurePass!123';
 
         $tenantBase = "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/v1/";
-        $tenantDomain = 'tenant.belluga.test';
+        $tenantDomain = 'tenant.platform.test';
         Tenant::query()->first()?->makeCurrent();
 
         $this->json(
