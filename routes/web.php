@@ -12,6 +12,8 @@ Route::middleware(['auth'])->group(function () {
 
 Route::middleware('tenant-maybe')->group(function () {
     Route::get('/open-app', [OpenAppRedirectController::class, 'redirect']);
+    Route::get('/.well-known/assetlinks.json', [BrandingController::class, 'getAssetLinks']);
+    Route::get('/.well-known/apple-app-site-association', [BrandingController::class, 'getAppleAppSiteAssociation']);
     Route::get('/', [TenantPublicShellController::class, 'fallback']);
     Route::get('/descobrir', [TenantPublicShellController::class, 'fallback']);
     Route::get('/privacy-policy', [TenantPublicShellController::class, 'fallback']);

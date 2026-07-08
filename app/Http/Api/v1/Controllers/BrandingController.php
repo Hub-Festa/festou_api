@@ -5,14 +5,16 @@ namespace App\Http\Api\v1\Controllers;
 use App\Application\Branding\BrandingManifestService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Response;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Shared\DeepLinks\Application\DeepLinkAssociationService;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class BrandingController extends Controller
 {
     public function __construct(
-        private readonly BrandingManifestService $brandingService
+        private readonly BrandingManifestService $brandingService,
+        private readonly DeepLinkAssociationService $deepLinkAssociationService,
     ) {
     }
 
@@ -70,5 +72,19 @@ class BrandingController extends Controller
     public function getIconDark(): Response|BinaryFileResponse
     {
         return $this->brandingService->assetResponse($this->getLogoSettingsParameter('dark_icon_uri'));
+    }
+
+    public function getAssetLinks(): JsonResponse
+    {
+        return response()->json(
+            $this->deepLinkAssociationService->buildAssetLinks()
+        )->header('Content-Type', 'application/json');
+    }
+
+    public function getAppleAppSiteAssociation(): JsonResponse
+    {
+        return response()->json(
+            $this->deepLinkAssociationService->buildAppleAppSiteAssociation()
+        )->header('Content-Type', 'application/json');
     }
 }
