@@ -4,27 +4,39 @@ declare(strict_types=1);
 
 namespace App\Actions;
 
+use App\Application\Tenants\TenantAppDomainResolverService;
+use App\Application\Tenants\TenantDomainResolverService;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
 use Spatie\Multitenancy\TenantFinder\TenantFinder;
-use App\Application\Tenants\TenantDomainResolverService;
 
 class DomainTenantFinder extends TenantFinder
 {
     private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
 
-    public function __construct(private readonly TenantDomainResolverService $domainResolver)
+    public function __construct(
+        private readonly TenantDomainResolverService $domainResolver,
+        private readonly TenantAppDomainResolverService $appDomainResolver,
+    )
     {
     }
 
     public function findForRequest(Request $request): ?IsTenant
     {
-        if($this->isRequestFromSubdomain()){
-            return $this->findTenantBySubdomain();
+        if ($this->isRequestFromSubdomain()) {
+            $tenant = $this->findTenantBySubdomain();
+
+            if ($tenant !== null) {
+                return $tenant;
+            }
         }
 
-        if($this->isRequestFromApp()){
-            return $this->findTenantByAppDomain();
+        if ($this->isRequestFromLandlordHost()) {
+            $tenant = $this->findTenantByAppDomain();
+
+            if ($tenant !== null) {
+                return $tenant;
+            }
         }
 
         return $this->findTenantByWebDomain();
@@ -32,8 +44,12 @@ class DomainTenantFinder extends TenantFinder
 
     protected function findTenantByAppDomain(): ?IsTenant
     {
-        $appDomain = request()->header('X-App-Domain');
-        return app(IsTenant::class)::where('app_domains', 'all', [$appDomain])->first();
+        $appDomain = $this->resolveAppDomainFromRequest();
+        if ($appDomain === null) {
+            return null;
+        }
+
+        return $this->appDomainResolver->findTenantByIdentifier($appDomain);
     }
 
     protected function findTenantByWebDomain(): ?IsTenant
@@ -51,27 +67,70 @@ class DomainTenantFinder extends TenantFinder
         return app(IsTenant::class)::where('subdomain', $subdomain)->first();
     }
 
-    protected function isRequestFromApp(): bool {
-        return request()->hasHeader('X-App-Domain');
-    }
-
     protected function isRequestFromSubdomain(): bool {
-        $host = request()->getHost();
-        $parts_request = explode('.', $host, 2);
+        $host = $this->normalizedHost(request()->getHost());
+        $landlordHost = $this->landlordHost();
 
-        if (count($parts_request) >= 2) {
-            $parts_config = explode('://', config('app.url'));
-            return $parts_request[1] === $parts_config[1];
+        if ($host === null || $landlordHost === null || $host === $landlordHost) {
+            return false;
         }
 
-        if($this->isLocalEnvironment()){
-            return in_array($parts_request[0], $this->local_environment_alternatives);
-        }
-
-        return false;
+        return str_ends_with($host, '.' . $landlordHost);
     }
 
-    private function isLocalEnvironment(): bool {
-        return in_array(request()->getHost(), $this->local_environment_alternatives);
+    protected function isRequestFromLandlordHost(): bool
+    {
+        $host = $this->normalizedHost(request()->getHost());
+        $landlordHost = $this->landlordHost();
+
+        if ($host === null || $landlordHost === null) {
+            return false;
+        }
+
+        return $host === $landlordHost;
+    }
+
+    private function landlordHost(): ?string
+    {
+        $host = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        if (! is_string($host) || trim($host) === '') {
+            $host = trim(str_replace(['https://', 'http://'], '', (string) config('app.url')), '/');
+        }
+
+        return $this->normalizedHost($host);
+    }
+
+    private function normalizedHost(?string $host): ?string
+    {
+        if (! is_string($host)) {
+            return null;
+        }
+
+        $normalized = trim(strtolower($host));
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    private function resolveAppDomainFromRequest(): ?string
+    {
+        $request = request();
+
+        $headerDomain = $request->header('X-App-Domain');
+        if (is_string($headerDomain) && trim($headerDomain) !== '') {
+            return trim($headerDomain);
+        }
+
+        $queryDomain = $request->query('app_domain');
+        if (is_string($queryDomain) && trim($queryDomain) !== '') {
+            return trim($queryDomain);
+        }
+
+        $inputDomain = $request->input('app_domain');
+        if (is_string($inputDomain) && trim($inputDomain) !== '') {
+            return trim($inputDomain);
+        }
+
+        return null;
     }
 }

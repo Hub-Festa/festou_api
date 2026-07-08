@@ -27,10 +27,14 @@ class TenantAppDomainController extends Controller
     public function store(TenantAppDomainRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $domains = $this->appDomainService->add($tenant, $request->validated()['app_domain']);
+        $domains = $this->appDomainService->upsert(
+            tenant: $tenant,
+            platform: $request->platform(),
+            identifier: $request->identifier(),
+        );
 
         return response()->json([
-            'message' => 'App domains added successfully.',
+            'message' => 'App domain identifier saved successfully.',
             'app_domains' => $domains,
         ]);
     }
@@ -38,10 +42,13 @@ class TenantAppDomainController extends Controller
     public function destroy(TenantAppDomainRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $domains = $this->appDomainService->remove($tenant, $request->validated()['app_domain']);
+        $domains = $this->appDomainService->remove(
+            tenant: $tenant,
+            platform: $request->platform(),
+        );
 
         return response()->json([
-            'message' => 'App domains deleted successfully.',
+            'message' => 'App domain identifier removed successfully.',
             'app_domains' => $domains,
         ]);
     }

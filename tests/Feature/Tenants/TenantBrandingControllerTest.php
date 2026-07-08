@@ -100,6 +100,27 @@ class TenantBrandingControllerTest extends TestCase
         $this->assertNotEmpty($response->json('branding_data.logo_settings.light_logo_uri'));
     }
 
+    public function testUpdateStoresPublicWebDefaultImage(): void
+    {
+        Storage::fake('public');
+
+        $file = UploadedFile::fake()->image('public-web-default.png', 160, 160);
+
+        $response = $this->withHeaders(['X-App-Domain' => 'tenant-sigma.test'])
+            ->post(sprintf('http://%s.%s/admin/api/v1/branding/update', 'tenant-sigma', $this->host), [
+                'public_web_metadata' => [
+                    'default_image' => $file,
+                ],
+            ]);
+
+        $response->assertOk();
+        $this->assertNotEmpty($response->json('branding_data.public_web_metadata.default_image'));
+        $this->assertStringContainsString(
+            '/api/v1/media/branding-public-web/',
+            (string) $response->json('branding_data.public_web_metadata.default_image')
+        );
+    }
+
     private function initializeSystem(): void
     {
         $service = $this->app->make(SystemInitializationService::class);

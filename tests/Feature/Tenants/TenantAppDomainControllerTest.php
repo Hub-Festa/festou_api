@@ -6,7 +6,9 @@ namespace Tests\Feature\Tenants;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -18,7 +20,7 @@ class TenantAppDomainControllerTest extends TestCase
 
     private Tenant $tenant;
 
-    private array $headers;
+    private LandlordUser $operator;
 
     private string $baseUrl;
 
@@ -33,52 +35,70 @@ class TenantAppDomainControllerTest extends TestCase
         }
 
         $this->tenant = Tenant::query()->firstOrFail();
-        $this->tenant->update(['app_domains' => ['tenanttheta.app']]);
+        $this->tenant->update(['app_domains' => []]);
+        $this->tenant->domains()->withTrashed()->whereIn('type', [
+            Tenant::DOMAIN_TYPE_APP_ANDROID,
+            Tenant::DOMAIN_TYPE_APP_IOS,
+        ])->get()->each->forceDelete();
+        $this->tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+            'path' => 'com.tenant.theta',
+        ]);
+        $this->tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_APP_IOS,
+            'path' => 'com.tenant.theta.ios',
+        ]);
+
         $this->tenant->makeCurrent();
-        $tenantHost = "{$this->tenant->subdomain}.{$this->host}";
-        $this->baseUrl = "http://{$tenantHost}/admin/api/v1/appdomains";
-
-        $this->headers = [
-            'X-App-Domain' => 'tenanttheta.app',
-        ];
+        $this->operator = LandlordUser::query()->firstOrFail();
+        $this->baseUrl = "http://{$this->tenant->subdomain}.{$this->host}/admin/api/v1/appdomains";
     }
 
-    public function testIndexReturnsTenantAppDomains(): void
+    public function testIndexRequiresReadAbility(): void
     {
-        $response = $this->withHeaders($this->headers)->getJson($this->baseUrl);
+        Sanctum::actingAs($this->operator, ['tenant-domains:update'], 'sanctum');
+
+        $response = $this->getJson($this->baseUrl);
+
+        $response->assertForbidden();
+    }
+
+    public function testIndexReturnsTypedTenantAppDomains(): void
+    {
+        Sanctum::actingAs($this->operator, ['tenant-domains:read'], 'sanctum');
+
+        $response = $this->getJson($this->baseUrl);
 
         $response->assertOk();
-        $response->assertJson([
-            'app_domains' => ['tenanttheta.app'],
-        ]);
+        $response->assertJsonPath('app_domains.android', 'com.tenant.theta');
+        $response->assertJsonPath('app_domains.ios', 'com.tenant.theta.ios');
     }
 
-    public function testStoreAppendsDomain(): void
+    public function testStoreUpsertsTypedDomain(): void
     {
-        $response = $this->withHeaders($this->headers)->postJson($this->baseUrl, [
-            'app_domain' => 'tenanttheta.mobile',
-        ]);
+        Sanctum::actingAs($this->operator, ['tenant-domains:update'], 'sanctum');
 
-        $response->assertOk();
-        $response->assertJson([
-            'message' => 'App domains added successfully.',
-            'app_domains' => ['tenanttheta.app', 'tenanttheta.mobile'],
-        ]);
-    }
-
-    public function testDestroyRemovesDomain(): void
-    {
-        $this->tenant->update(['app_domains' => ['tenanttheta.app', 'removethis.app']]);
-
-        $response = $this->withHeaders($this->headers)->deleteJson($this->baseUrl, [
-            'app_domain' => 'removethis.app',
+        $response = $this->postJson($this->baseUrl, [
+            'platform' => 'android',
+            'identifier' => 'com.tenant.theta.mobile',
         ]);
 
         $response->assertOk();
-        $response->assertJson([
-            'message' => 'App domains deleted successfully.',
-            'app_domains' => ['tenanttheta.app'],
+        $response->assertJsonPath('message', 'App domain identifier saved successfully.');
+        $response->assertJsonPath('app_domains.android', 'com.tenant.theta.mobile');
+    }
+
+    public function testDestroyRemovesTypedDomain(): void
+    {
+        Sanctum::actingAs($this->operator, ['tenant-domains:update'], 'sanctum');
+
+        $response = $this->deleteJson($this->baseUrl, [
+            'platform' => 'android',
         ]);
+
+        $response->assertOk();
+        $response->assertJsonPath('message', 'App domain identifier removed successfully.');
+        $response->assertJsonPath('app_domains.android', null);
     }
 
     private function initializeSystem(): void

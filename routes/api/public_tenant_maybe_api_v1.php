@@ -2,6 +2,7 @@
 
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
+use App\Http\Api\v1\Controllers\BrandingPublicWebMediaController;
 use App\Http\Api\v1\Controllers\EnvironmentController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
@@ -12,6 +13,11 @@ use Illuminate\Support\Facades\Route;
 Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
 
 Route::middleware('tenant')->group(function () {
+    Route::get(
+        '/media/branding-public-web/{branding_subject_id}/default_image',
+        [BrandingPublicWebMediaController::class, 'defaultImage']
+    );
+
     Route::prefix('anonymous')
         ->group(function () {
             Route::post('/identities', [AnonymousIdentityController::class, 'store']);

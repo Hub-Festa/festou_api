@@ -25,9 +25,14 @@ Route::prefix('domains')
 
 Route::prefix('appdomains')
     ->group(function () {
-        Route::get('/', [TenantAppDomainController::class, 'index']);
-        Route::post('/', [TenantAppDomainController::class, 'store']);
-        Route::delete('/', [TenantAppDomainController::class, 'destroy']);
+        Route::get('/', [TenantAppDomainController::class, 'index'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-domains:read']);
+
+        Route::post('/', [TenantAppDomainController::class, 'store'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-domains:update']);
+
+        Route::delete('/', [TenantAppDomainController::class, 'destroy'])
+            ->middleware(['auth:sanctum', CheckTenantAccess::class, 'abilities:tenant-domains:update']);
     });
 
 // Rotas protegidas para o tenant

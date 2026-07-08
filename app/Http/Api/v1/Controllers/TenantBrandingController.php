@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Tenants\TenantBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
 use App\Models\Landlord\Tenant;
@@ -13,7 +14,8 @@ class TenantBrandingController
     use HasLogoFiles;
 
     public function __construct(
-        private readonly TenantBrandingManagementService $brandingService
+        private readonly TenantBrandingManagementService $brandingService,
+        private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
     ) {
     }
 
@@ -22,6 +24,14 @@ class TenantBrandingController
         $tenant = Tenant::resolve();
         $validated = $request->validated();
         $uploadedLogos = $this->processLogoUploads($request);
+
+        if ($request->hasFile('public_web_metadata.default_image')) {
+            $validated['public_web_metadata']['default_image'] = $this->brandingPublicWebMediaService->storeDefaultImage(
+                $request->getSchemeAndHttpHost(),
+                $tenant,
+                $request->file('public_web_metadata.default_image')
+            );
+        }
 
         $pwaVariants = [];
         if ($request->hasFile('logo_settings.pwa_icon')) {
@@ -35,6 +45,14 @@ class TenantBrandingController
             $validated,
             $uploadedLogos,
             $pwaVariants
+        );
+        if ($request->hasFile('public_web_metadata.default_image')) {
+            $brandingData['public_web_metadata']['default_image'] = (string) $validated['public_web_metadata']['default_image'];
+        }
+        $brandingData = $this->brandingPublicWebMediaService->materializeBrandingData(
+            $request->getSchemeAndHttpHost(),
+            $tenant,
+            $brandingData
         );
 
         return response()->json([

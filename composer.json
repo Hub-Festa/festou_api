@@ -31,7 +31,10 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/",
+            "Shared\\DeepLinks\\": "packages/shared/deep_links/src/",
+            "Shared\\Media\\": "packages/shared/media/src/",
             "Shared\\Favorites\\": "packages/shared/favorites/src/",
+            "Shared\\Settings\\": "packages/shared/settings/src/",
             "Shared\\PushHandler\\": "packages/shared/push_handler/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
