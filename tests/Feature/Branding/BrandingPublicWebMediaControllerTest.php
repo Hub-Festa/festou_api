@@ -7,9 +7,11 @@ namespace Tests\Feature\Branding;
 use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
+use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 
@@ -54,6 +56,81 @@ class BrandingPublicWebMediaControllerTest extends TestCase
 
         $response->assertOk();
         $response->assertHeader('content-type', 'image/png');
+    }
+
+    public function testPublicBrandingAssetRoutesGenerateNeutralMediaWhenStoredMediaIsMissing(): void
+    {
+        Storage::fake('public');
+
+        $this->tenant->branding_data = [];
+        $this->tenant->save();
+        Landlord::singleton()->update(['branding_data' => []]);
+
+        foreach ([
+            '/favicon.ico',
+            '/logo-light.png',
+            '/logo-dark.png',
+            '/icon-light.png',
+            '/icon-dark.png',
+            '/icon/icon-192x192.png',
+            '/icon/icon-512x512.png',
+            '/icon/icon-maskable-512x512.png',
+        ] as $route) {
+            $response = $this->get("http://tenant-branding.test{$route}");
+
+            $this->assertSame(200, $response->getStatusCode(), $route.' should resolve successfully.');
+            $response->assertHeader('content-type', 'image/png');
+            $this->assertNotInstanceOf(
+                BinaryFileResponse::class,
+                $response->baseResponse,
+                $route.' must be generated at runtime rather than served from a web-shell asset.'
+            );
+            $this->assertNotEmpty($response->getContent(), $route.' should contain generated image bytes.');
+        }
+    }
+
+    public function testFaviconResolvesHostScopedStoredMediaBeforeTheGeneratedFallback(): void
+    {
+        Storage::fake('public');
+        config()->set('app.url', 'https://landlord-branding.test');
+
+        $landlord = Landlord::singleton();
+        $landlordPath = 'landlord/logos/favicon.ico';
+        $tenantPath = "tenants/{$this->tenant->slug}/logos/favicon.ico";
+        $faviconContents = (string) file_get_contents(base_path('tests/Assets/landlord.ico'));
+
+        Storage::disk('public')->put($landlordPath, $faviconContents);
+        Storage::disk('public')->put($tenantPath, $faviconContents);
+        $this->setFaviconUri($landlord, "/storage/{$landlordPath}");
+        $this->setFaviconUri($this->tenant, "/storage/{$tenantPath}");
+
+        $landlordResponse = $this->get('http://landlord-branding.test/favicon.ico');
+        $tenantResponse = $this->get('http://tenant-branding.test/favicon.ico');
+
+        $this->assertServesStoredFile($landlordResponse, $landlordPath);
+        $this->assertServesStoredFile($tenantResponse, $tenantPath);
+    }
+
+    private function setFaviconUri(Landlord|Tenant $brandable, string $uri): void
+    {
+        $branding = is_array($brandable->branding_data) ? $brandable->branding_data : [];
+        $logoSettings = is_array($branding['logo_settings'] ?? null)
+            ? $branding['logo_settings']
+            : [];
+        $logoSettings['favicon_uri'] = $uri;
+        $branding['logo_settings'] = $logoSettings;
+        $brandable->branding_data = $branding;
+        $brandable->save();
+    }
+
+    private function assertServesStoredFile($response, string $expectedPath): void
+    {
+        $response->assertOk();
+        $this->assertInstanceOf(BinaryFileResponse::class, $response->baseResponse);
+        $this->assertSame(
+            Storage::disk('public')->path($expectedPath),
+            $response->baseResponse->getFile()->getPathname(),
+        );
     }
 
     private function initializeSystem(): void

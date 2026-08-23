@@ -68,9 +68,11 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
+        <env name="DEEP_LINK_ROUTE_POLICY_CONFIG_FILE" value="tests/Fixtures/DeepLinks/project_deep_link_route_policy_belluga.php"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="PUBLIC_WEB_PROJECT_ROUTE_CONFIG_FILE" value="tests/Fixtures/PublicWeb/project_public_shell_routes.php"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="DB_DATABASE" value="landlord_test" />

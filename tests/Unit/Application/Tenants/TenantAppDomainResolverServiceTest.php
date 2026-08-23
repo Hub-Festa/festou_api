@@ -40,10 +40,10 @@ class TenantAppDomainResolverServiceTest extends TestCase
     {
         $this->tenant->domains()->create([
             'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
-            'path' => 'com.guarappari.app',
+            'path' => 'com.example.tenant.android',
         ]);
 
-        $resolved = $this->service->findTenantByIdentifier('com.guarappari.app');
+        $resolved = $this->service->findTenantByIdentifier('com.example.tenant.android');
 
         $this->assertNotNull($resolved);
         $this->assertSame((string) $this->tenant->getKey(), (string) $resolved?->getKey());
@@ -53,10 +53,10 @@ class TenantAppDomainResolverServiceTest extends TestCase
     {
         $this->tenant->domains()->create([
             'type' => Tenant::DOMAIN_TYPE_APP_IOS,
-            'path' => 'com.guarappari.ios',
+            'path' => 'com.example.tenant.ios',
         ]);
 
-        $resolved = $this->service->findTenantByIdentifier('com.guarappari.ios');
+        $resolved = $this->service->findTenantByIdentifier('com.example.tenant.ios');
 
         $this->assertNotNull($resolved);
         $this->assertSame((string) $this->tenant->getKey(), (string) $resolved?->getKey());
@@ -65,10 +65,10 @@ class TenantAppDomainResolverServiceTest extends TestCase
     public function testFindTenantByIdentifierFallsBackToLegacyAppDomains(): void
     {
         $this->tenant->update([
-            'app_domains' => ['legacy.guarappari.app'],
+            'app_domains' => ['legacy.example.tenant.app'],
         ]);
 
-        $resolved = $this->service->findTenantByIdentifier('legacy.guarappari.app');
+        $resolved = $this->service->findTenantByIdentifier('legacy.example.tenant.app');
 
         $this->assertNotNull($resolved);
         $this->assertSame((string) $this->tenant->getKey(), (string) $resolved?->getKey());
@@ -83,7 +83,7 @@ class TenantAppDomainResolverServiceTest extends TestCase
             landlord: ['name' => 'Landlord HQ'],
             tenant: ['name' => 'Tenant Theta', 'subdomain' => 'tenant-theta'],
             role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'fixture-password-placeholder'],
             themeDataSettings: [
                 'brightness_default' => 'light',
                 'primary_seed_color' => '#fff',

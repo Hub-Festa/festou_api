@@ -3,21 +3,14 @@
 namespace Tests\Api\v1\Tenants\Branding;
 
 use App\Application\Branding\BrandingPublicWebMediaService;
-use App\Application\Initialization\InitializationPayload;
-use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Shared\PushHandler\Models\Tenants\TenantPushSettings;
-use Tests\TestCase;
-use Tests\Traits\RefreshLandlordAndTenantDatabases;
+use Tests\TestCaseAuthenticated;
 
-class ApiV1EnvironmentApiTest extends TestCase
+class ApiV1EnvironmentApiTest extends TestCaseAuthenticated
 {
-    use RefreshLandlordAndTenantDatabases;
-
-    private static bool $bootstrapped = false;
-
     private Tenant $tenant;
 
     private string $baseUrl;
@@ -26,13 +19,9 @@ class ApiV1EnvironmentApiTest extends TestCase
     {
         parent::setUp();
 
-        if (! self::$bootstrapped) {
-            $this->refreshLandlordAndTenantDatabases();
-            $this->initializeSystem();
-            self::$bootstrapped = true;
-        }
-
-        $this->tenant = Tenant::query()->firstOrFail();
+        $this->tenant = Tenant::query()
+            ->where('slug', $this->landlord->tenant_primary->slug)
+            ->firstOrFail();
         $this->tenant->domains()->withTrashed()->get()->each->forceDelete();
         $this->tenant->domains()->create([
             'type' => Tenant::DOMAIN_TYPE_WEB,
@@ -65,6 +54,9 @@ class ApiV1EnvironmentApiTest extends TestCase
         ]);
         $response->assertJsonPath('type', 'tenant');
         $response->assertJsonPath('main_domain', 'https://tenant-beta.test');
+        $response->assertJsonPath('theme_data_settings.brightness_default', 'light');
+        $response->assertJsonPath('theme_data_settings.primary_seed_color', '#FFFFFF');
+        $response->assertJsonPath('theme_data_settings.secondary_seed_color', '#999999');
     }
 
     public function testEnvironmentApiReturnsNormalizedPublicWebMetadata(): void
@@ -162,29 +154,6 @@ class ApiV1EnvironmentApiTest extends TestCase
         $response->assertJsonPath('telemetry.0.type', 'mixpanel');
         $response->assertJsonPath('telemetry.0.token', 'flat-map-token');
         $response->assertJsonPath('telemetry.0.events.0', 'invite_received');
-    }
-
-    private function initializeSystem(): void
-    {
-        /** @var SystemInitializationService $service */
-        $service = $this->app->make(SystemInitializationService::class);
-
-        $payload = new InitializationPayload(
-            landlord: ['name' => 'Landlord HQ'],
-            tenant: ['name' => 'Tenant Beta', 'subdomain' => 'tenant-beta', 'app_domains' => ['tenant-beta.test']],
-            role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
-            themeDataSettings: [
-                'brightness_default' => 'light',
-                'primary_seed_color' => '#fff',
-                'secondary_seed_color' => '#000',
-            ],
-            logoSettings: ['light_logo_uri' => '/logos/light.png'],
-            pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
-            tenantDomains: ['tenant-beta.test']
-        );
-
-        $service->initialize($payload);
     }
 
 }

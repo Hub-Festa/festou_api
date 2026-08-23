@@ -5,19 +5,65 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Application\PublicWeb\FlutterWebShellRenderer;
+use App\Application\PublicWeb\ProjectPublicShellRouteRegistry;
 use App\Application\PublicWeb\PublicWebMetadataService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Shared\DeepLinks\Application\CompiledProjectRoutePolicy;
 use Shared\DeepLinks\Application\WebToAppPromotionService;
 
 class TenantPublicShellController extends Controller
 {
     public function __construct(
         private readonly PublicWebMetadataService $metadataService,
+        private readonly ProjectPublicShellRouteRegistry $projectRouteRegistry,
         private readonly FlutterWebShellRenderer $shellRenderer,
         private readonly WebToAppPromotionService $promotionService,
+        private readonly CompiledProjectRoutePolicy $compiledRoutePolicy,
     ) {}
+
+    public function projectRoute(
+        Request $request,
+        ?string $projectPublicShellSegment = null,
+    ): Response|RedirectResponse
+    {
+        $route = $request->route();
+        $routeId = $route === null
+            ? ''
+            : trim((string) ($route->defaults['project_public_shell_route_id'] ?? ''));
+        if ($routeId === '') {
+            abort(404);
+        }
+
+        $definition = $this->projectRouteRegistry->routeDefinition($routeId);
+        $requestedUri = $this->projectRouteRegistry->requestedPathForDefinition(
+            $request,
+            $definition,
+            $projectPublicShellSegment,
+        );
+        $consumeDirectFallbackBypass = $this->shouldConsumeDirectFallbackBypass(
+            $request,
+            $requestedUri,
+        );
+        $redirect = $this->redirectToInstalledAppIfAndroid(
+            $request,
+            $requestedUri,
+            $consumeDirectFallbackBypass,
+        );
+        if ($redirect !== null) {
+            return $redirect;
+        }
+
+        return $this->renderShell(
+            $this->projectRouteRegistry->metadataForRoute(
+                $request,
+                $routeId,
+                $projectPublicShellSegment,
+            ),
+            $consumeDirectFallbackBypass,
+        );
+    }
 
     public function fallback(
         Request $request,
@@ -36,25 +82,6 @@ class TenantPublicShellController extends Controller
         );
         if ($redirect !== null) {
             return $redirect;
-        }
-
-        $route = $request->route();
-        if ($route !== null) {
-            $accountProfileSlug = $route->parameter('account_profile_slug');
-            if (is_string($accountProfileSlug) && $accountProfileSlug !== '') {
-                return $this->renderShell(
-                    $this->metadataService->accountProfileMetadata($accountProfileSlug),
-                    $consumeDirectFallbackBypass,
-                );
-            }
-
-            $eventSlug = $route->parameter('event_slug');
-            if (is_string($eventSlug) && $eventSlug !== '') {
-                return $this->renderShell(
-                    $this->metadataService->eventMetadata($eventSlug),
-                    $consumeDirectFallbackBypass,
-                );
-            }
         }
 
         return $this->renderShell(
@@ -127,6 +154,10 @@ class TenantPublicShellController extends Controller
             return null;
         }
 
+        if ($this->shouldSkipDirectAndroidHandoffForKnownInAppBrowser($request)) {
+            return null;
+        }
+
         if ($this->isPromotionBoundaryPath($targetPath)) {
             return null;
         }
@@ -162,6 +193,32 @@ class TenantPublicShellController extends Controller
             ? (string) ($parts['path'] ?? '/')
             : $targetPath;
 
-        return in_array(rtrim($path, '/'), ['/baixe-o-app', '/open-app'], true);
+        $normalizedPath = rtrim($path, '/');
+        if ($normalizedPath === '/open-app') {
+            return true;
+        }
+
+        $promotionFallbackPath = $this->compiledRoutePolicy->promotionFallbackPath();
+        if ($promotionFallbackPath === null) {
+            return false;
+        }
+
+        return $normalizedPath === rtrim($promotionFallbackPath, '/');
+    }
+
+    private function shouldSkipDirectAndroidHandoffForKnownInAppBrowser(Request $request): bool
+    {
+        $userAgent = strtolower(trim((string) $request->userAgent()));
+        if ($userAgent === '') {
+            return false;
+        }
+
+        foreach (['instagram', 'fban', 'fbav', 'fb_iab', 'messenger'] as $marker) {
+            if (str_contains($userAgent, $marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -12,6 +12,7 @@ class DeepLinkAssociationService
     public function __construct(
         private readonly AppLinksIdentifierGatewayContract $identifierGateway,
         private readonly AppLinksSettingsSourceContract $settingsSource,
+        private readonly CompiledProjectRoutePolicy $compiledPolicy,
     ) {}
 
     /**
@@ -47,7 +48,7 @@ class DeepLinkAssociationService
 
         $teamId = trim((string) data_get($settings, 'ios.team_id', ''));
         $bundleId = $this->resolveIosBundleId($settings);
-        $paths = $this->normalizePaths(data_get($settings, 'ios.paths', ['/invite*', '/convites*']));
+        $paths = $this->compiledPolicy->associationPaths();
 
         if ($teamId === '' || $bundleId === '') {
             return [
@@ -165,34 +166,6 @@ class DeepLinkAssociationService
         }
 
         return array_values(array_unique($normalized));
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    private function normalizePaths(mixed $value): array
-    {
-        if (! is_array($value)) {
-            return ['/invite*', '/convites*'];
-        }
-
-        $paths = [];
-        foreach ($value as $path) {
-            if (! is_string($path)) {
-                continue;
-            }
-
-            $candidate = trim($path);
-            if ($candidate !== '') {
-                $paths[] = $candidate;
-            }
-        }
-
-        if ($paths === []) {
-            return ['/invite*', '/convites*'];
-        }
-
-        return array_values(array_unique($paths));
     }
 
     private function normalizeText(mixed $value): ?string

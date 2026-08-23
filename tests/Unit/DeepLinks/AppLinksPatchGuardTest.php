@@ -15,7 +15,34 @@ class AppLinksPatchGuardTest extends TestCase
 {
     public function testGuardBlocksAndroidFingerprintsWithoutAndroidIdentifier(): void
     {
-        $guard = new AppLinksPatchGuard(
+        $this->expectException(ValidationException::class);
+        $this->makeGuard()->guard('tenant', null, 'app_links', [
+            'android' => [
+                'sha256_cert_fingerprints' => ['AB:CD'],
+            ],
+        ], $this->makeDefinition());
+    }
+
+    public function testGuardRejectsRetiredIosPathAuthority(): void
+    {
+        try {
+            $this->makeGuard()->guard('tenant', null, 'app_links', [
+                'ios' => [
+                    'paths' => ['/legacy*'],
+                ],
+            ], $this->makeDefinition());
+
+            $this->fail('Expected the retired ios.paths authority to be rejected.');
+        } catch (ValidationException $exception) {
+            $this->assertSame([
+                'Project deep-link route policy owns Apple association paths; app_links.ios.paths is retired.',
+            ], $exception->errors()['ios.paths'] ?? []);
+        }
+    }
+
+    private function makeGuard(): AppLinksPatchGuard
+    {
+        return new AppLinksPatchGuard(
             new class implements AppLinksIdentifierGatewayContract {
                 public function identifierForPlatform(string $platform): ?string
                 {
@@ -34,8 +61,11 @@ class AppLinksPatchGuardTest extends TestCase
                 }
             },
         );
+    }
 
-        $definition = new SettingsNamespaceDefinition(
+    private function makeDefinition(): SettingsNamespaceDefinition
+    {
+        return new SettingsNamespaceDefinition(
             namespace: 'app_links',
             scope: 'tenant',
             label: 'App Links',
@@ -66,12 +96,6 @@ class AppLinksPatchGuardTest extends TestCase
                     'label' => 'Apple Team ID',
                     'default' => null,
                 ],
-                'ios.paths' => [
-                    'type' => 'array',
-                    'nullable' => false,
-                    'label' => 'iOS Universal Link Paths',
-                    'default' => ['/invite*'],
-                ],
                 'ios.enabled' => [
                     'type' => 'boolean',
                     'nullable' => false,
@@ -86,12 +110,5 @@ class AppLinksPatchGuardTest extends TestCase
                 ],
             ],
         );
-
-        $this->expectException(ValidationException::class);
-        $guard->guard('tenant', null, 'app_links', [
-            'android' => [
-                'sha256_cert_fingerprints' => ['AB:CD'],
-            ],
-        ], $definition);
     }
 }

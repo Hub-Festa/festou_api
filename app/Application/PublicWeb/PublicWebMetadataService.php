@@ -65,9 +65,10 @@ class PublicWebMetadataService
     /**
      * @return array<string, string>
      */
-    public function accountProfileMetadata(string $slug): array
+    public function accountProfileMetadata(string $slug, ?string $requestedPath = null): array
     {
-        $metadata = $this->defaultMetadata('/parceiro/'.$slug);
+        $canonicalPath = $requestedPath ?? '/parceiro/'.$slug;
+        $metadata = $this->defaultMetadata($canonicalPath);
         $profile = AccountProfile::query()
             ->where('slug', $slug)
             ->first();
@@ -101,7 +102,7 @@ class PublicWebMetadataService
             $profile->getAttribute('cover_url'),
             $profile->getAttribute('avatar_url'),
         ]);
-        $metadata['canonical_url'] = $this->canonicalUrlForPath('/parceiro/'.$slug);
+        $metadata['canonical_url'] = $this->canonicalUrlForPath($canonicalPath);
 
         return $metadata;
     }
@@ -109,9 +110,10 @@ class PublicWebMetadataService
     /**
      * @return array<string, string>
      */
-    public function eventMetadata(string $slug): array
+    public function eventMetadata(string $slug, ?string $requestedPath = null): array
     {
-        $metadata = $this->defaultMetadata('/agenda/evento/'.$slug);
+        $canonicalPath = $requestedPath ?? '/agenda/evento/'.$slug;
+        $metadata = $this->defaultMetadata($canonicalPath);
         $event = EventOccurrence::query()
             ->where('slug', $slug)
             ->where('is_event_published', true)
@@ -145,7 +147,7 @@ class PublicWebMetadataService
             $event->getAttribute('thumbnail_url'),
             $this->eventPartyImageCandidate($event),
         ]);
-        $metadata['canonical_url'] = $this->canonicalUrlForPath('/agenda/evento/'.$slug);
+        $metadata['canonical_url'] = $this->canonicalUrlForPath($canonicalPath);
 
         return $metadata;
     }
@@ -153,15 +155,28 @@ class PublicWebMetadataService
     private function canonicalUrlForPath(?string $path = null): string
     {
         $base = request()->getSchemeAndHttpHost();
-        $normalizedPath = trim((string) ($path ?? request()->getRequestUri() ?? '/'));
-        if ($normalizedPath === '') {
-            $normalizedPath = '/';
-        }
-        if (! str_starts_with($normalizedPath, '/')) {
-            $normalizedPath = '/'.$normalizedPath;
-        }
+        $normalizedPath = $this->normalizeCanonicalPath($path ?? request()->getPathInfo() ?? '/');
 
         return $base.$normalizedPath;
+    }
+
+    private function normalizeCanonicalPath(?string $path): string
+    {
+        $candidate = trim((string) $path);
+        if ($candidate === '') {
+            return '/';
+        }
+
+        $parsedPath = parse_url($candidate, PHP_URL_PATH);
+        if (is_string($parsedPath) && $parsedPath !== '') {
+            $candidate = $parsedPath;
+        }
+
+        if (! str_starts_with($candidate, '/')) {
+            $candidate = '/'.$candidate;
+        }
+
+        return $candidate === '' ? '/' : $candidate;
     }
 
     /**

@@ -45,7 +45,7 @@ class WellKnownAssociationTest extends TestCase
     public function test_assetlinks_uses_tenant_settings_payload(): void
     {
         $this->tenant->makeCurrent();
-        $this->upsertTypedAppDomain(Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.guarappari.app');
+        $this->upsertTypedAppDomain(Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.example.tenant.android');
 
         TenantSettings::query()->updateOrCreate(['_id' => TenantSettings::ROOT_ID], [
             'app_links' => [
@@ -64,7 +64,7 @@ class WellKnownAssociationTest extends TestCase
         $response->assertHeader('Content-Type', 'application/json');
         $response->assertDontSee('<!DOCTYPE html>', false);
         $response->assertJsonPath('0.target.namespace', 'android_app');
-        $response->assertJsonPath('0.target.package_name', 'com.guarappari.app');
+        $response->assertJsonPath('0.target.package_name', 'com.example.tenant.android');
         $response->assertJsonPath(
             '0.target.sha256_cert_fingerprints.0',
             '3E:72:4C:54:E9:53:26:7D:E6:E1:9B:F8:DC:53:30:2A:08:01:8E:36:40:4D:0C:CA:98:3B:46:84:53:E7:A9:A9'
@@ -74,7 +74,7 @@ class WellKnownAssociationTest extends TestCase
     public function test_apple_app_site_association_uses_tenant_settings_payload(): void
     {
         $this->tenant->makeCurrent();
-        $this->upsertTypedAppDomain(Tenant::DOMAIN_TYPE_APP_IOS, 'com.guarappari.app');
+        $this->upsertTypedAppDomain(Tenant::DOMAIN_TYPE_APP_IOS, 'com.example.tenant.ios');
 
         TenantSettings::query()->updateOrCreate(['_id' => TenantSettings::ROOT_ID], [
             'app_links' => [
@@ -92,7 +92,7 @@ class WellKnownAssociationTest extends TestCase
         $response->assertHeader('Content-Type', 'application/json');
         $response->assertDontSee('<!DOCTYPE html>', false);
         $response->assertJsonPath('applinks.apps', []);
-        $response->assertJsonPath('applinks.details.0.appID', 'ABCDE12345.com.guarappari.app');
+        $response->assertJsonPath('applinks.details.0.appID', 'ABCDE12345.com.example.tenant.ios');
         $response->assertJsonPath('applinks.details.0.paths.0', '/invite*');
     }
 
@@ -166,14 +166,14 @@ class WellKnownAssociationTest extends TestCase
         LandlordSettings::query()->updateOrCreate(['_id' => LandlordSettings::ROOT_ID], [
             'app_links' => [
                 'android' => [
-                    'package_name' => 'com.boilerplate.admin',
+                    'package_name' => 'com.example.landlord.admin',
                     'sha256_cert_fingerprints' => [
                         '0f:1e:2d:3c:4b:5a:69:78:87:96:a5:b4:c3:d2:e1:f0:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00',
                     ],
                 ],
                 'ios' => [
                     'team_id' => 'LANDLORD1',
-                    'bundle_id' => 'com.boilerplate.admin',
+                    'bundle_id' => 'com.example.landlord.admin',
                     'paths' => ['/invite*', '/convites*'],
                 ],
             ],
@@ -184,7 +184,7 @@ class WellKnownAssociationTest extends TestCase
         $assetLinks->assertHeader('Content-Type', 'application/json');
         $assetLinks->assertDontSee('<!DOCTYPE html>', false);
         $assetLinks->assertJsonPath('0.target.namespace', 'android_app');
-        $assetLinks->assertJsonPath('0.target.package_name', 'com.boilerplate.admin');
+        $assetLinks->assertJsonPath('0.target.package_name', 'com.example.landlord.admin');
         $assetLinks->assertJsonPath(
             '0.target.sha256_cert_fingerprints.0',
             '0F:1E:2D:3C:4B:5A:69:78:87:96:A5:B4:C3:D2:E1:F0:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00'
@@ -195,7 +195,7 @@ class WellKnownAssociationTest extends TestCase
         $apple->assertHeader('Content-Type', 'application/json');
         $apple->assertDontSee('<!DOCTYPE html>', false);
         $apple->assertJsonPath('applinks.apps', []);
-        $apple->assertJsonPath('applinks.details.0.appID', 'LANDLORD1.com.boilerplate.admin');
+        $apple->assertJsonPath('applinks.details.0.appID', 'LANDLORD1.com.example.landlord.admin');
         $apple->assertJsonPath('applinks.details.0.paths.0', '/invite*');
     }
 
@@ -208,7 +208,7 @@ class WellKnownAssociationTest extends TestCase
             landlord: ['name' => 'Landlord HQ'],
             tenant: ['name' => 'Tenant Association', 'subdomain' => 'tenant-association', 'app_domains' => ['tenant-association.test']],
             role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'fixture-password-placeholder'],
             themeDataSettings: [
                 'brightness_default' => 'light',
                 'primary_seed_color' => '#fff',

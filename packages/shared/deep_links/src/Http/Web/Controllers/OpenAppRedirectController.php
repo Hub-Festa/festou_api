@@ -7,6 +7,7 @@ namespace Shared\DeepLinks\Http\Web\Controllers;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Shared\DeepLinks\Application\CompiledProjectRoutePolicy;
 use Shared\DeepLinks\Application\WebToAppPromotionService;
 use Shared\DeepLinks\Contracts\AppLinksSettingsSourceContract;
 
@@ -15,12 +16,14 @@ class OpenAppRedirectController extends Controller
     public function __construct(
         private readonly WebToAppPromotionService $promotionService,
         private readonly AppLinksSettingsSourceContract $settingsSource,
+        private readonly CompiledProjectRoutePolicy $compiledRoutePolicy,
     ) {}
 
     public function redirect(Request $request): RedirectResponse
     {
         $targetPath = $this->promotionService->normalizeTargetPath($request->query('path'));
-        $code = $this->promotionService->normalizeCode($request->query('code'));
+        $externalArgumentKey = $this->compiledRoutePolicy->canonicalQueryRule()['external_argument_key'] ?? 'code';
+        $code = $this->promotionService->normalizeCode($request->query((string) $externalArgumentKey));
         $storeChannel = $this->promotionService->normalizeStoreChannel($request->query('store_channel'));
         $fallbackMode = $this->promotionService->coerceFallbackModeForStoreChannel(
             $storeChannel,

@@ -6,8 +6,12 @@ namespace Shared\DeepLinks;
 
 use Illuminate\Support\ServiceProvider;
 use RuntimeException;
+use Shared\DeepLinks\Application\CompiledProjectRoutePolicy;
+use Shared\DeepLinks\Application\ProjectRoutePolicyCompiler;
 use Shared\DeepLinks\Contracts\AppLinksIdentifierGatewayContract;
 use Shared\DeepLinks\Contracts\AppLinksSettingsSourceContract;
+use Shared\DeepLinks\Contracts\ProjectRoutePolicySourceContract;
+use Shared\DeepLinks\Contracts\PublicShellRouteInventorySourceContract;
 
 class DeepLinksServiceProvider extends ServiceProvider
 {
@@ -15,6 +19,15 @@ class DeepLinksServiceProvider extends ServiceProvider
     {
         $this->ensureHostBinding(AppLinksIdentifierGatewayContract::class);
         $this->ensureHostBinding(AppLinksSettingsSourceContract::class);
+        $this->ensureHostBinding(ProjectRoutePolicySourceContract::class);
+        $this->ensureHostBinding(PublicShellRouteInventorySourceContract::class);
+
+        $this->app->singleton(CompiledProjectRoutePolicy::class, function ($app): CompiledProjectRoutePolicy {
+            return (new ProjectRoutePolicyCompiler(
+                $app->make(ProjectRoutePolicySourceContract::class),
+                $app->make(PublicShellRouteInventorySourceContract::class),
+            ))->compile();
+        });
     }
 
     private function ensureHostBinding(string $abstract): void

@@ -192,7 +192,7 @@ class Tenant extends BaseTenant
         return [
             'name'             => $this->name,
             'short_name'       => $this->short_name ?? $this->name,
-            'description'      => $this->description,
+            'description'      => (string) ($this->description ?? ''),
             'start_url'        => '/',
             'display'          => 'standalone',
             'background_color' => $main_color,

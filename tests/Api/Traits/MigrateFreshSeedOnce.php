@@ -17,8 +17,8 @@ trait MigrateFreshSeedOnce
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
 
-        // Atlas drops can hang or fail; prefer non-destructive migrate in that case.
-        if ($dsn !== '' && str_contains($dsn, 'mongodb+srv://')) {
+        // Mongo database drops are asynchronous; keep migrations deterministic with collection cleanup.
+        if ($dsn !== '' && str_contains($dsn, 'mongodb')) {
             return 'migrate';
         }
 

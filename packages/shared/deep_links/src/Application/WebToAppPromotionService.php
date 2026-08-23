@@ -16,6 +16,7 @@ class WebToAppPromotionService
 
     public function __construct(
         private readonly AppLinksIdentifierGatewayContract $identifierGateway,
+        private readonly CompiledProjectRoutePolicy $compiledRoutePolicy,
     ) {}
 
     /**
@@ -96,6 +97,14 @@ class WebToAppPromotionService
             path: $path,
             includeAuthOwnedAppPaths: true,
         ) ?? '/';
+    }
+
+    public function normalizeTargetPathOrNull(?string $path): ?string
+    {
+        return $this->normalizeTargetPathInternal(
+            path: $path,
+            includeAuthOwnedAppPaths: true,
+        );
     }
 
     public function normalizeCode(?string $code): ?string
@@ -235,13 +244,35 @@ class WebToAppPromotionService
         string $targetPath,
         ?string $code,
     ): string {
-        $pathOnly = $this->pathOnly($targetPath);
-        $isInviteContext = ($pathOnly === '/invite' || $pathOnly === '/convites') && $code !== null;
-        if ($isInviteContext) {
-            return $origin.'/invite?code='.rawurlencode($code);
+        $canonicalRule = $this->compiledRoutePolicy->canonicalQueryRule();
+        $matchedRoute = $this->compiledRoutePolicy->exactRouteForPath(
+            $this->pathOnly($targetPath)
+        );
+        if (
+            $canonicalRule !== null
+            && $matchedRoute !== null
+            && $this->routeParticipatesInCanonicalQuery($matchedRoute, $canonicalRule)
+        ) {
+            if ($code !== null) {
+                $targetRoute = $this->compiledRoutePolicy->routeDefinition(
+                    (string) $canonicalRule['target_route_id']
+                );
+                if ($targetRoute !== null) {
+                    return $origin.(string) $targetRoute['path'].'?'.http_build_query([
+                        (string) $canonicalRule['query_key'] => $code,
+                    ]);
+                }
+            }
+
+            $absentRoute = $this->compiledRoutePolicy->inventoryRoute(
+                (string) $canonicalRule['absent_value_route_id']
+            );
+            if ($absentRoute !== null) {
+                return $origin.(string) $absentRoute['path'];
+            }
         }
 
-        if ($targetPath === '/' || $pathOnly === '/invite' || $pathOnly === '/convites') {
+        if ($targetPath === '/') {
             return $origin.'/';
         }
 
@@ -250,25 +281,37 @@ class WebToAppPromotionService
 
     private function resolvePropagatedCode(string $targetPath, ?string $code): ?string
     {
-        $pathOnly = $this->pathOnly($targetPath);
-        $isInviteContext = ($pathOnly === '/invite' || $pathOnly === '/convites');
-        if (! $isInviteContext) {
+        $canonicalRule = $this->compiledRoutePolicy->canonicalQueryRule();
+        if ($canonicalRule === null) {
             return null;
         }
 
-        if ($code !== null) {
-            return $code;
-        }
-
-        $parts = parse_url($targetPath);
-        if ($parts === false || ! isset($parts['query'])) {
+        $matchedRoute = $this->compiledRoutePolicy->exactRouteForPath(
+            $this->pathOnly($targetPath)
+        );
+        if ($matchedRoute === null || ! $this->routeParticipatesInCanonicalQuery($matchedRoute, $canonicalRule)) {
             return null;
         }
 
-        parse_str($parts['query'], $params);
-        $targetCode = $params['code'] ?? null;
+        $externalValue = $code !== null ? $this->normalizeCode($code) : null;
+        $routeValue = $this->canonicalRouteQueryValue(
+            $targetPath,
+            (string) $canonicalRule['query_key']
+        );
 
-        return is_string($targetCode) && trim($targetCode) !== '' ? trim($targetCode) : null;
+        if ($externalValue === null) {
+            return $routeValue;
+        }
+
+        if ($routeValue === null) {
+            return $externalValue;
+        }
+
+        if ((string) $canonicalRule['conflict_strategy'] === 'external_wins') {
+            return $externalValue;
+        }
+
+        return $externalValue === $routeValue ? $externalValue : null;
     }
 
     private function normalizeTargetPathInternal(
@@ -291,7 +334,11 @@ class WebToAppPromotionService
         }
 
         $normalizedPath = $this->normalizePath($parts['path'] ?? '/');
-        if ($normalizedPath === '/baixe-o-app' || $normalizedPath === '/open-app') {
+        $promotionFallbackPath = $this->compiledRoutePolicy->promotionFallbackPath();
+        if (
+            $normalizedPath === '/open-app'
+            || ($promotionFallbackPath !== null && $normalizedPath === $promotionFallbackPath)
+        ) {
             return null;
         }
 
@@ -303,25 +350,23 @@ class WebToAppPromotionService
             }
         }
 
-        if ($normalizedPath === '/invite' || $normalizedPath === '/convites') {
-            $code = $queryParams['code'] ?? null;
-            if (is_string($code) && trim($code) !== '') {
-                return '/invite?code='.rawurlencode(trim($code));
-            }
-
-            return $normalizedPath;
+        if ($normalizedPath === '/') {
+            return '/';
         }
 
-        if ($this->isAuthOwnedContinuationPath($normalizedPath)) {
-            return $includeAuthOwnedAppPaths ? $normalizedPath : null;
-        }
-
-        if ($normalizedPath === '/auth' || str_starts_with($normalizedPath, '/auth/')) {
-            if ($unwrapDepth >= self::MAX_REDIRECT_UNWRAP_DEPTH) {
+        $nestedContinuation = $this->compiledRoutePolicy->nestedContinuation();
+        if (
+            $nestedContinuation !== null
+            && $this->matchesNestedContinuationBoundary($normalizedPath, $nestedContinuation)
+        ) {
+            if ($unwrapDepth >= min(
+                (int) ($nestedContinuation['max_unwrap_depth'] ?? self::MAX_REDIRECT_UNWRAP_DEPTH),
+                self::MAX_REDIRECT_UNWRAP_DEPTH,
+            )) {
                 return null;
             }
 
-            $nestedRedirect = $queryParams['redirect'] ?? null;
+            $nestedRedirect = $queryParams[(string) $nestedContinuation['target_query_key']] ?? null;
             if (! is_string($nestedRedirect) || trim($nestedRedirect) === '') {
                 return null;
             }
@@ -333,11 +378,27 @@ class WebToAppPromotionService
             );
         }
 
-        if (! $this->isAllowedPublicContinuationPath($normalizedPath)) {
+        $matchedRoute = $this->compiledRoutePolicy->continuationRouteForPath($normalizedPath);
+        if ($matchedRoute === null) {
             return null;
         }
 
-        $allowedQuery = $this->allowedQueryParametersForPath($normalizedPath, $queryParams);
+        if (
+            ! $includeAuthOwnedAppPaths
+            && (string) $matchedRoute['ingress_requirement'] === ProjectRoutePolicyCompiler::INGRESS_CONTINUATION_ONLY
+        ) {
+            return null;
+        }
+
+        $canonicalNormalized = $this->normalizeCanonicalQueryPath(
+            $matchedRoute,
+            $queryParams,
+        );
+        if ($canonicalNormalized !== null) {
+            return $canonicalNormalized;
+        }
+
+        $allowedQuery = $this->allowedQueryParametersForRoute($matchedRoute, $queryParams);
         if ($allowedQuery === []) {
             return $normalizedPath;
         }
@@ -382,11 +443,11 @@ class WebToAppPromotionService
         return $path.$query;
     }
 
-    private function buildPromotionFallbackUrl(string $openTargetUrl): string
+    private function buildPromotionFallbackUrl(string $openTargetUrl): ?string
     {
         $parts = parse_url($openTargetUrl);
         if ($parts === false || ! isset($parts['scheme'], $parts['host'])) {
-            return $openTargetUrl;
+            return null;
         }
 
         $origin = strtolower((string) $parts['scheme']).'://'.$parts['host'];
@@ -394,8 +455,18 @@ class WebToAppPromotionService
             $origin .= ':'.$parts['port'];
         }
 
-        return $origin.'/baixe-o-app?'.http_build_query([
-            'redirect' => $this->targetPathFromOpenTargetUrl($openTargetUrl),
+        $promotionFallbackPath = $this->compiledRoutePolicy->promotionFallbackPath();
+        if ($promotionFallbackPath === null) {
+            return null;
+        }
+
+        $promotionFallbackRoute = $this->compiledRoutePolicy->exactRouteForPath($promotionFallbackPath);
+        if ($promotionFallbackRoute === null) {
+            return null;
+        }
+
+        return $origin.$promotionFallbackPath.'?'.http_build_query([
+            (string) $promotionFallbackRoute['target_query_key'] => $this->targetPathFromOpenTargetUrl($openTargetUrl),
         ]);
     }
 
@@ -436,67 +507,82 @@ class WebToAppPromotionService
             .';end';
     }
 
-    private function isAuthOwnedContinuationPath(string $path): bool
-    {
-        return $path === '/profile' || $path === '/convites/compartilhar';
-    }
-
-    private function isAllowedPublicContinuationPath(string $path): bool
-    {
-        if (in_array($path, ['/', '/privacy-policy', '/descobrir', '/mapa', '/mapa/poi', '/location/permission'], true)) {
-            return true;
-        }
-
-        if ($this->isEventDetailPath($path)) {
-            return true;
-        }
-
-        $segments = $this->pathSegments($path);
-        if (count($segments) !== 2) {
-            return false;
-        }
-
-        return in_array($segments[0], ['parceiro', 'static'], true);
-    }
-
-    private function isEventDetailPath(string $path): bool
-    {
-        $segments = $this->pathSegments($path);
-
-        return count($segments) === 3
-            && $segments[0] === 'agenda'
-            && $segments[1] === 'evento'
-            && trim($segments[2]) !== '';
-    }
-
     /**
-     * @return list<string>
+     * @param  array<string, mixed>  $route
+     * @param  array<string, mixed>  $canonicalRule
      */
-    private function pathSegments(string $path): array
+    private function routeParticipatesInCanonicalQuery(array $route, array $canonicalRule): bool
     {
-        return array_values(array_filter(
-            explode('/', $path),
-            fn (string $segment): bool => trim($segment) !== ''
-        ));
+        $routeId = (string) $route['route_id'];
+
+        return in_array($routeId, $canonicalRule['source_route_ids'], true)
+            || $routeId === (string) $canonicalRule['target_route_id'];
+    }
+
+    private function canonicalRouteQueryValue(string $targetPath, string $queryKey): ?string
+    {
+        $parts = parse_url($targetPath);
+        if ($parts === false || ! isset($parts['query'])) {
+            return null;
+        }
+
+        parse_str((string) $parts['query'], $params);
+        $value = $params[$queryKey] ?? null;
+
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
 
     /**
+     * @param  array<string, mixed>  $route
+     * @param  array<string, mixed>  $queryParams
+     */
+    private function normalizeCanonicalQueryPath(array $route, array $queryParams): ?string
+    {
+        $canonicalRule = $this->compiledRoutePolicy->canonicalQueryRule();
+        if (
+            $canonicalRule === null
+            || (string) $route['shape'] !== ProjectRoutePolicyCompiler::SHAPE_EXACT
+            || ! $this->routeParticipatesInCanonicalQuery($route, $canonicalRule)
+        ) {
+            return null;
+        }
+
+        $queryKey = (string) $canonicalRule['query_key'];
+        $routeValue = $queryParams[$queryKey] ?? null;
+        if (! is_string($routeValue) || trim($routeValue) === '') {
+            return null;
+        }
+
+        $targetRoute = $this->compiledRoutePolicy->routeDefinition(
+            (string) $canonicalRule['target_route_id']
+        );
+        if ($targetRoute === null) {
+            return null;
+        }
+
+        return (string) $targetRoute['path'].'?'.http_build_query([
+            $queryKey => trim($routeValue),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $route
      * @param  array<string, mixed>  $queryParams
      * @return array<string, string>
      */
-    private function allowedQueryParametersForPath(string $path, array $queryParams): array
+    private function allowedQueryParametersForRoute(array $route, array $queryParams): array
     {
-        $allowedKeys = [];
-        if ($this->isEventDetailPath($path)) {
-            $allowedKeys[] = 'occurrence';
-        }
-        if ($path === '/mapa' || $path === '/mapa/poi') {
-            $allowedKeys[] = 'poi';
-            $allowedKeys[] = 'stack';
+        $allowedKeys = $route['query_keys'] ?? [];
+        if (! is_array($allowedKeys) || $allowedKeys === []) {
+            return [];
         }
 
         $output = [];
         foreach ($allowedKeys as $key) {
+            if (! is_string($key)) {
+                continue;
+            }
+
             $value = $queryParams[$key] ?? null;
             if (is_string($value) && trim($value) !== '') {
                 $output[$key] = trim($value);
@@ -504,6 +590,23 @@ class WebToAppPromotionService
         }
 
         return $output;
+    }
+
+    /**
+     * @param  array<string, mixed>  $nestedContinuation
+     */
+    private function matchesNestedContinuationBoundary(string $normalizedPath, array $nestedContinuation): bool
+    {
+        $boundaryPath = (string) $nestedContinuation['boundary_path'];
+        if ($normalizedPath === $boundaryPath) {
+            return true;
+        }
+
+        if ((string) $nestedContinuation['boundary_match'] === 'exact') {
+            return false;
+        }
+
+        return str_starts_with($normalizedPath, $boundaryPath.'/');
     }
 
     /**

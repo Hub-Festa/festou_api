@@ -34,44 +34,68 @@ class BrandingController extends Controller
         return $this->brandingService->resolvePwaIcon($parameter) ?? '';
     }
 
-    public function getFavicon(): Response|BinaryFileResponse
+    public function getFavicon(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('favicon_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolveFaviconAsset($request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getLogoLight(): Response|BinaryFileResponse
+    public function getLogoLight(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('light_logo_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolveLogoSetting('light_logo_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getLogoDark(): Response|BinaryFileResponse
+    public function getLogoDark(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('dark_logo_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolveLogoSetting('dark_logo_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getMaskableIcon(): Response|BinaryFileResponse
+    public function getMaskableIcon(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getPwaIconParameter('icon_maskable512_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolvePwaIcon('icon_maskable512_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getIcon192(): Response|BinaryFileResponse
+    public function getIcon192(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getPwaIconParameter('icon192_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolvePwaIcon('icon192_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getIcon512(): Response|BinaryFileResponse
+    public function getIcon512(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getPwaIconParameter('icon512_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolvePwaIcon('icon512_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getIconLight(): Response|BinaryFileResponse
+    public function getIconLight(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('light_icon_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolveLogoSetting('light_icon_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
-    public function getIconDark(): Response|BinaryFileResponse
+    public function getIconDark(Request $request): Response|BinaryFileResponse
     {
-        return $this->brandingService->assetResponse($this->getLogoSettingsParameter('dark_icon_uri'));
+        return $this->brandingService->assetResponse(
+            $this->brandingService->resolveLogoSetting('dark_icon_uri', $request->getHost()),
+            $request->getHost(),
+        );
     }
 
     public function getAssetLinks(): JsonResponse

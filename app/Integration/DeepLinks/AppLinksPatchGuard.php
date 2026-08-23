@@ -28,17 +28,29 @@ class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
         array $payload,
         SettingsNamespaceDefinition $definition,
     ): void {
-        if ($scope !== 'tenant' || $namespace !== 'app_links') {
+        if ($namespace !== 'app_links') {
+            return;
+        }
+
+        $normalizedPatch = $this->normalizePatchPayload($payload, $definition->namespace);
+        $errors = [];
+
+        if ($this->containsRetiredPathAuthority($normalizedPatch)) {
+            $errors['ios.paths'][] = 'Project deep-link route policy owns Apple association paths; app_links.ios.paths is retired.';
+        }
+
+        if ($scope !== 'tenant') {
+            if ($errors !== []) {
+                throw ValidationException::withMessages($errors);
+            }
+
             return;
         }
 
         $current = $this->settingsSource->currentAppLinksSettings();
-        $normalizedPatch = $this->normalizePatchPayload($payload, $definition->namespace);
         foreach ($normalizedPatch as $path => $value) {
             Arr::set($current, $path, $value);
         }
-
-        $errors = [];
 
         $fingerprints = $this->normalizeFingerprints(data_get($current, 'android.sha256_cert_fingerprints', []));
         if ($fingerprints !== [] && ! $this->identifierGateway->hasIdentifierForPlatform('android')) {
@@ -94,6 +106,24 @@ class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param  array<string, mixed>  $normalizedPatch
+     */
+    private function containsRetiredPathAuthority(array $normalizedPatch): bool
+    {
+        foreach (array_keys($normalizedPatch) as $path) {
+            if (! is_string($path)) {
+                continue;
+            }
+
+            if ($path === 'ios.paths' || str_starts_with($path, 'ios.paths.')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
