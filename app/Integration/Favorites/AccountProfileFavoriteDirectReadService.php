@@ -37,64 +37,42 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
             : self::DEFAULT_PAGE_SIZE;
         $skip = ($resolvedPage - 1) * $resolvedPageSize;
 
-        $edges = FavoriteEdge::query()
-            ->where('owner_user_id', $ownerUserId)
-            ->where('registry_key', 'account_profile')
-            ->where('target_type', 'account_profile')
-            ->orderBy('favorited_at', 'desc')
-            ->orderBy('_id')
-            ->get(['_id', 'target_id', 'favorited_at']);
+        $rawRows = $this->loadOrderPreservingFavoriteRows(
+            ownerUserId: $ownerUserId,
+            skip: $skip,
+            limit: $resolvedPageSize + 1,
+        );
 
-        if ($edges->isEmpty()) {
+        if ($rawRows === []) {
             return [
                 'items' => [],
                 'has_more' => false,
             ];
         }
 
-        $profiles = $this->loadActiveProfiles($edges);
-        if ($profiles === []) {
-            return [
-                'items' => [],
-                'has_more' => false,
-            ];
-        }
-
-        $occurrenceStates = $this->loadLiveAndNextOccurrenceStates(array_keys($profiles));
+        $hasMore = count($rawRows) > $resolvedPageSize;
+        $pageRows = array_slice($rawRows, 0, $resolvedPageSize);
         $rows = [];
 
-        foreach ($edges as $edge) {
-            $targetId = trim((string) ($edge->target_id ?? ''));
-            if ($targetId === '') {
-                continue;
-            }
-
-            $profile = $profiles[$targetId] ?? null;
+        foreach ($pageRows as $rawRow) {
+            $edge = (new FavoriteEdge)->newFromBuilder($rawRow);
+            $profile = $this->hydrateProfile($rawRow['profile'] ?? null);
             if (! $profile instanceof AccountProfile) {
                 continue;
             }
 
-            $state = $occurrenceStates[$targetId] ?? [
-                'live_now' => null,
-                'next' => null,
-                'last' => null,
-            ];
-
             $rows[] = $this->buildRow(
                 edge: $edge,
                 profile: $profile,
-                liveNowOccurrence: $state['live_now'] ?? null,
-                nextOccurrence: $state['next'] ?? null,
+                liveNowOccurrence: $this->hydrateOccurrence($rawRow['live_now_occurrence'] ?? null),
+                nextOccurrence: $this->hydrateOccurrence($rawRow['next_occurrence'] ?? null),
                 lastOccurrence: null,
             );
         }
 
-        usort($rows, fn (array $left, array $right): int => $this->compareRows($left, $right));
-
-        $pagedRows = array_slice($rows, $skip, $resolvedPageSize);
         $lastOccurrenceStates = $this->loadLastOccurrenceStates(array_values(array_unique(array_map(
             static fn (array $row): string => (string) ($row['profile_id'] ?? ''),
-            $pagedRows,
+            $rows,
         ))));
 
         return [
@@ -103,155 +81,321 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                     $row['payload'],
                     $lastOccurrenceStates[(string) ($row['profile_id'] ?? '')] ?? null,
                 ),
-                $pagedRows,
+                $rows,
             ),
-            'has_more' => count($rows) > ($skip + $resolvedPageSize),
+            'has_more' => $hasMore,
         ];
     }
 
     /**
-     * @param  iterable<int, FavoriteEdge>  $edges
-     * @return array<string, AccountProfile>
+     * @return array<int, array<string, mixed>>
      */
-    private function loadActiveProfiles(iterable $edges): array
-    {
-        $targetIds = [];
-        foreach ($edges as $edge) {
-            $targetId = trim((string) ($edge->target_id ?? ''));
-            if ($targetId !== '') {
-                $targetIds[$targetId] = $targetId;
-            }
+    private function loadOrderPreservingFavoriteRows(
+        string $ownerUserId,
+        int $skip,
+        int $limit,
+    ): array {
+        $now = Carbon::now();
+        $pipeline = $this->buildFavoriteOrderingPipeline(
+            ownerUserId: $ownerUserId,
+            now: new UTCDateTime($now->toDateTimeImmutable()),
+            skip: $skip,
+            limit: $limit,
+        );
+
+        $rows = FavoriteEdge::raw(
+            static fn ($collection) => $collection->aggregate($pipeline)
+        );
+
+        $normalizedRows = [];
+        foreach ($rows as $row) {
+            $normalizedRows[] = $row instanceof FavoriteEdge
+                ? $row->getAttributes()
+                : $this->normalizeArray($row);
         }
 
-        if ($targetIds === []) {
-            return [];
-        }
-
-        $profiles = AccountProfile::withTrashed()
-            ->whereIn('_id', array_values($targetIds))
-            ->get([
-                '_id',
-                'slug',
-                'display_name',
-                'avatar_url',
-                'cover_url',
-                'profile_type',
-                'is_active',
-                'deleted_at',
-            ]);
-
-        $activeProfiles = [];
-        foreach ($profiles as $profile) {
-            if ($profile->trashed() || (bool) ($profile->is_active ?? true) === false) {
-                continue;
-            }
-
-            $activeProfiles[(string) $profile->getAttribute('_id')] = $profile;
-        }
-
-        return $activeProfiles;
+        return $normalizedRows;
     }
 
     /**
-     * @param  array<int, string>  $profileIds
-     * @return array<string, array{live_now:?EventOccurrence,next:?EventOccurrence,last:?EventOccurrence}>
+     * @return array<int, array<string, mixed>>
      */
-    private function loadLiveAndNextOccurrenceStates(array $profileIds): array
-    {
-        $normalizedProfileIds = array_values(array_unique(array_filter(array_map(
-            static fn (string $value): string => trim($value),
-            $profileIds,
-        ), static fn (string $value): bool => $value !== '')));
-
-        if ($normalizedProfileIds === []) {
-            return [];
-        }
-
-        $profileIdCandidates = [];
-        foreach ($normalizedProfileIds as $profileId) {
-            foreach ($this->buildProfileIdCandidates($profileId) as $candidate) {
-                $profileIdCandidates[] = $candidate;
-            }
-        }
-
-        $now = Carbon::now();
-
-        $occurrences = EventOccurrence::query()
-            ->where('deleted_at', null)
-            ->where('is_event_published', true)
-            ->where(static function ($query) use ($now): void {
-                $query->where('effective_ends_at', '>', $now)
-                    ->orWhere('starts_at', '>=', $now);
-            })
-            ->where(static function ($query) use ($profileIdCandidates): void {
-                $query->where(static function ($query) use ($profileIdCandidates): void {
-                    $query->where('place_ref.type', 'account_profile')
-                        ->where(static function ($query) use ($profileIdCandidates): void {
-                            $query->whereIn('place_ref.id', $profileIdCandidates)
-                                ->orWhereIn('place_ref._id', $profileIdCandidates);
-                        });
-                })->orWhereRaw([
-                    'event_parties' => [
-                        '$elemMatch' => [
-                            'party_ref_id' => ['$in' => $profileIdCandidates],
+    private function buildFavoriteOrderingPipeline(
+        string $ownerUserId,
+        UTCDateTime $now,
+        int $skip,
+        int $limit,
+    ): array {
+        return [
+            [
+                '$match' => [
+                    'owner_user_id' => $ownerUserId,
+                    'registry_key' => 'account_profile',
+                    'target_type' => 'account_profile',
+                ],
+            ],
+            [
+                '$lookup' => [
+                    'from' => 'account_profiles',
+                    'let' => ['profileId' => '$target_id'],
+                    'pipeline' => [
+                        [
+                            '$match' => [
+                                '$or' => [
+                                    ['is_active' => true],
+                                    ['is_active' => null],
+                                    ['is_active' => ['$exists' => false]],
+                                ],
+                                'deleted_at' => null,
+                                '$expr' => [
+                                    '$eq' => [
+                                        $this->asStringExpression('$_id'),
+                                        $this->asStringExpression('$$profileId'),
+                                    ],
+                                ],
+                            ],
+                        ],
+                        [
+                            '$project' => [
+                                '_id' => 1,
+                                'slug' => 1,
+                                'display_name' => 1,
+                                'avatar_url' => 1,
+                                'cover_url' => 1,
+                                'profile_type' => 1,
+                                'is_active' => 1,
+                                'deleted_at' => 1,
+                            ],
                         ],
                     ],
-                ]);
-            })
-            ->orderBy('starts_at')
-            ->orderBy('_id')
-            ->get([
-                '_id',
-                'slug',
-                'starts_at',
-                'effective_ends_at',
-                'ends_at',
-                'place_ref',
-                'event_parties',
-            ]);
+                    'as' => 'profile',
+                ],
+            ],
+            ['$unwind' => '$profile'],
+            [
+                '$lookup' => [
+                    'from' => 'event_occurrences',
+                    'localField' => 'target_id',
+                    'foreignField' => 'place_ref._id',
+                    'pipeline' => $this->buildOccurrenceStatePipeline($now, true),
+                    'as' => 'direct_occurrence_state',
+                ],
+            ],
+            [
+                '$lookup' => [
+                    'from' => 'event_occurrences',
+                    'localField' => 'target_id',
+                    'foreignField' => 'event_parties.party_ref_id',
+                    'pipeline' => $this->buildOccurrenceStatePipeline($now),
+                    'as' => 'party_occurrence_state',
+                ],
+            ],
+            [
+                '$set' => [
+                    '__direct_occurrence_state' => [
+                        '$arrayElemAt' => ['$direct_occurrence_state', 0],
+                    ],
+                    '__party_occurrence_state' => [
+                        '$arrayElemAt' => ['$party_occurrence_state', 0],
+                    ],
+                ],
+            ],
+            [
+                '$set' => [
+                    '__live_now_candidates' => [
+                        '$concatArrays' => [
+                            ['$ifNull' => ['$__direct_occurrence_state.live_now', []]],
+                            ['$ifNull' => ['$__party_occurrence_state.live_now', []]],
+                        ],
+                    ],
+                    '__next_candidates' => [
+                        '$concatArrays' => [
+                            ['$ifNull' => ['$__direct_occurrence_state.next', []]],
+                            ['$ifNull' => ['$__party_occurrence_state.next', []]],
+                        ],
+                    ],
+                ],
+            ],
+            [
+                '$set' => [
+                    '__live_now' => [
+                        '$arrayElemAt' => [
+                            [
+                                '$sortArray' => [
+                                    'input' => '$__live_now_candidates',
+                                    'sortBy' => ['starts_at' => 1, '__occurrence_id_sort' => 1],
+                                ],
+                            ],
+                            0,
+                        ],
+                    ],
+                    '__next' => [
+                        '$arrayElemAt' => [
+                            [
+                                '$sortArray' => [
+                                    'input' => '$__next_candidates',
+                                    'sortBy' => ['starts_at' => 1, '__occurrence_id_sort' => 1],
+                                ],
+                            ],
+                            0,
+                        ],
+                    ],
+                ],
+            ],
+            [
+                '$set' => [
+                    '__sort_block' => [
+                        '$cond' => [
+                            ['$gt' => [['$size' => '$__live_now_candidates'], 0]],
+                            0,
+                            [
+                                '$cond' => [
+                                    ['$gt' => [['$size' => '$__next_candidates'], 0]],
+                                    1,
+                                    2,
+                                ],
+                            ],
+                        ],
+                    ],
+                    '__favorite_id_sort' => $this->asStringExpression('$_id'),
+                ],
+            ],
+            [
+                '$set' => [
+                    '__sort_upcoming_at' => [
+                        '$cond' => [
+                            ['$eq' => ['$__sort_block', 1]],
+                            '$__next.starts_at',
+                            null,
+                        ],
+                    ],
+                ],
+            ],
+            [
+                '$sort' => [
+                    '__sort_block' => 1,
+                    '__sort_upcoming_at' => 1,
+                    'favorited_at' => -1,
+                    '__favorite_id_sort' => 1,
+                ],
+            ],
+            ['$skip' => $skip],
+            ['$limit' => $limit],
+            [
+                '$project' => [
+                    '_id' => 1,
+                    'target_id' => 1,
+                    'favorited_at' => 1,
+                    'profile' => 1,
+                    'live_now_occurrence' => '$__live_now',
+                    'next_occurrence' => '$__next',
+                ],
+            ],
+        ];
+    }
 
-        $states = [];
-        $favoriteProfileIdSet = array_fill_keys($normalizedProfileIds, true);
-
-        foreach ($occurrences as $occurrence) {
-            $associatedProfileIds = $this->extractAssociatedProfileIds(
-                $occurrence,
-                $favoriteProfileIdSet,
-            );
-            if ($associatedProfileIds === []) {
-                continue;
-            }
-
-            foreach ($associatedProfileIds as $profileId) {
-                $currentState = $states[$profileId] ?? [
-                    'live_now' => null,
-                    'next' => null,
-                    'last' => null,
-                ];
-
-                $startsAt = $occurrence->starts_at;
-                $effectiveEndsAt = $occurrence->effective_ends_at ?? $occurrence->ends_at;
-                if ($startsAt instanceof Carbon && $effectiveEndsAt instanceof Carbon) {
-                    if ($startsAt->lessThanOrEqualTo($now) && $effectiveEndsAt->greaterThan($now)) {
-                        $currentLive = $currentState['live_now'] ?? null;
-                        if (! $currentLive instanceof EventOccurrence || $this->startsBefore($occurrence, $currentLive)) {
-                            $currentState['live_now'] = $occurrence;
-                        }
-                    }
-                }
-
-                if ($startsAt instanceof Carbon && $startsAt->greaterThanOrEqualTo($now)) {
-                    $currentNext = $currentState['next'] ?? null;
-                    if (! $currentNext instanceof EventOccurrence || $this->startsBefore($occurrence, $currentNext)) {
-                        $currentState['next'] = $occurrence;
-                    }
-                }
-
-                $states[$profileId] = $currentState;
-            }
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildOccurrenceStatePipeline(UTCDateTime $now, bool $requireAccountProfilePlace = false): array
+    {
+        $match = [
+            'deleted_at' => null,
+            'is_event_published' => true,
+            '$expr' => [
+                '$or' => [
+                    ['$gt' => ['$__effective_end_at', $now]],
+                    ['$gte' => ['$starts_at', $now]],
+                ],
+            ],
+        ];
+        if ($requireAccountProfilePlace) {
+            $match['place_ref.type'] = 'account_profile';
         }
 
-        return $states;
+        return [
+            [
+                '$set' => [
+                    '__effective_end_at' => [
+                        '$ifNull' => ['$effective_ends_at', '$ends_at'],
+                    ],
+                    '__occurrence_id_sort' => $this->asStringExpression('$_id'),
+                ],
+            ],
+            ['$match' => $match],
+            [
+                '$project' => [
+                    '_id' => 1,
+                    'slug' => 1,
+                    'starts_at' => 1,
+                    'effective_ends_at' => 1,
+                    'ends_at' => 1,
+                    'place_ref' => 1,
+                    'event_parties' => 1,
+                    '__effective_end_at' => 1,
+                    '__occurrence_id_sort' => 1,
+                ],
+            ],
+            [
+                '$facet' => [
+                    'live_now' => [
+                        [
+                            '$match' => [
+                                '$expr' => [
+                                    '$and' => [
+                                        ['$lte' => ['$starts_at', $now]],
+                                        ['$gt' => ['$__effective_end_at', $now]],
+                                    ],
+                                ],
+                            ],
+                        ],
+                        ['$sort' => ['starts_at' => 1, '__occurrence_id_sort' => 1]],
+                        ['$limit' => 1],
+                    ],
+                    'next' => [
+                        [
+                            '$match' => [
+                                '$expr' => ['$gte' => ['$starts_at', $now]],
+                            ],
+                        ],
+                        ['$sort' => ['starts_at' => 1, '__occurrence_id_sort' => 1]],
+                        ['$limit' => 1],
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    private function asStringExpression(string $field): array
+    {
+        return [
+            '$convert' => [
+                'input' => $field,
+                'to' => 'string',
+                'onError' => '',
+                'onNull' => '',
+            ],
+        ];
+    }
+
+    private function hydrateProfile(mixed $rawProfile): ?AccountProfile
+    {
+        $profile = $this->normalizeArray($rawProfile);
+        if ($profile === []) {
+            return null;
+        }
+
+        return (new AccountProfile)->newFromBuilder($profile);
+    }
+
+    private function hydrateOccurrence(mixed $rawOccurrence): ?EventOccurrence
+    {
+        $occurrence = $this->normalizeArray($rawOccurrence);
+        if ($occurrence === []) {
+            return null;
+        }
+
+        return (new EventOccurrence)->newFromBuilder($occurrence);
     }
 
     /**
@@ -464,91 +608,6 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
         $payload['occurrence_state'] = $occurrenceState;
 
         return $payload;
-    }
-
-    private function compareRows(array $left, array $right): int
-    {
-        $blockCompare = (int) ($left['sort_block'] ?? 2) <=> (int) ($right['sort_block'] ?? 2);
-        if ($blockCompare !== 0) {
-            return $blockCompare;
-        }
-
-        if ((int) ($left['sort_block'] ?? 2) === 1) {
-            $upcomingCompare = $this->compareDatesAscending(
-                $left['sort_upcoming_occurrence_at'] ?? null,
-                $right['sort_upcoming_occurrence_at'] ?? null,
-            );
-            if ($upcomingCompare !== 0) {
-                return $upcomingCompare;
-            }
-        }
-
-        $favoritedCompare = $this->compareDatesDescending(
-            $left['favorited_at'] ?? null,
-            $right['favorited_at'] ?? null,
-        );
-        if ($favoritedCompare !== 0) {
-            return $favoritedCompare;
-        }
-
-        return strcmp(
-            (string) ($left['favorite_id'] ?? ''),
-            (string) ($right['favorite_id'] ?? ''),
-        );
-    }
-
-    private function compareDatesAscending(
-        mixed $left,
-        mixed $right,
-    ): int {
-        if (! $left instanceof \DateTimeInterface && ! $right instanceof \DateTimeInterface) {
-            return 0;
-        }
-
-        if (! $left instanceof \DateTimeInterface) {
-            return 1;
-        }
-
-        if (! $right instanceof \DateTimeInterface) {
-            return -1;
-        }
-
-        return $left->getTimestamp() <=> $right->getTimestamp();
-    }
-
-    private function compareDatesDescending(
-        mixed $left,
-        mixed $right,
-    ): int {
-        if (! $left instanceof \DateTimeInterface && ! $right instanceof \DateTimeInterface) {
-            return 0;
-        }
-
-        if (! $left instanceof \DateTimeInterface) {
-            return 1;
-        }
-
-        if (! $right instanceof \DateTimeInterface) {
-            return -1;
-        }
-
-        return $right->getTimestamp() <=> $left->getTimestamp();
-    }
-
-    private function startsBefore(EventOccurrence $left, EventOccurrence $right): bool
-    {
-        $leftStartsAt = $left->starts_at;
-        $rightStartsAt = $right->starts_at;
-
-        if (! $leftStartsAt instanceof \DateTimeInterface || ! $rightStartsAt instanceof \DateTimeInterface) {
-            return false;
-        }
-
-        if ($leftStartsAt->getTimestamp() === $rightStartsAt->getTimestamp()) {
-            return strcmp((string) $left->getAttribute('_id'), (string) $right->getAttribute('_id')) < 0;
-        }
-
-        return $leftStartsAt->getTimestamp() < $rightStartsAt->getTimestamp();
     }
 
     private function startsAfter(EventOccurrence $left, EventOccurrence $right): bool

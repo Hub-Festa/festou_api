@@ -9,7 +9,9 @@ use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\EventOccurrence;
 use App\Support\Auth\AbilityCatalog;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Shared\Favorites\Models\Tenants\FavoriteEdge;
@@ -74,6 +76,13 @@ class FavoriteDirectReadQueryContractTest extends TestCase
             'target_type' => 'account_profile',
             'target_id' => (string) $otherOwnerProfile->_id,
             'favorited_at' => now()->subSecond(),
+        ]);
+        FavoriteEdge::create([
+            'owner_user_id' => 'different-owner',
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+            'target_id' => (string) $firstProfile->_id,
+            'favorited_at' => now()->subSeconds(2),
         ]);
 
         $pageOne = $this->getJson($this->favoritesUrl('?page=1&page_size=1'));
@@ -174,8 +183,13 @@ class FavoriteDirectReadQueryContractTest extends TestCase
         $this->assertStringContainsString('use App\\Models\\Tenants\\AccountProfile;', $source);
         $this->assertStringContainsString('use App\\Models\\Tenants\\EventOccurrence;', $source);
         $this->assertStringContainsString('use Shared\\Favorites\\Models\\Tenants\\FavoriteEdge;', $source);
+        $this->assertStringContainsString("'from' => 'account_profiles'", $source);
+        $this->assertStringContainsString("'from' => 'event_occurrences'", $source);
+        $this->assertStringContainsString("'__sort_block'", $source);
+        $this->assertStringContainsString("'__sort_upcoming_at'", $source);
         $this->assertStringContainsString("where('place_ref.type', 'account_profile')", $source);
         $this->assertStringContainsString("'party_ref_id' => ['\$in' => \$profileIdCandidates]", $source);
+        $this->assertStringNotContainsString("->get(['_id', 'target_id', 'favorited_at'])", $source);
         $this->assertStringNotContainsString("getAttribute('artists')", $source);
         $this->assertStringNotContainsString("getAttribute('linked_account_profiles')", $source);
         $this->assertStringNotContainsString($removedVendorNamespace.'\\Favorites', $source);
@@ -227,6 +241,122 @@ class FavoriteDirectReadQueryContractTest extends TestCase
             ->assertJson(['message' => 'Tenant not found for this host.']);
     }
 
+    public function test_mounted_route_preserves_canonical_live_next_recency_and_id_order(): void
+    {
+        config(['favorites.publicly_navigable_profile_types' => ['artist']]);
+        FavoriteEdge::query()->where('owner_user_id', (string) $this->owner->_id)->delete();
+
+        $liveProfile = $this->createProfile('Live Favorite');
+        $earlyProfile = $this->createProfile('Early Favorite');
+        $lateProfile = $this->createProfile('Late Favorite');
+        $plainProfile = $this->createProfile('Plain Favorite');
+        $now = Carbon::now();
+
+        $this->createOccurrence($liveProfile, $now->copy()->subHour(), $now->copy()->addHour());
+        $this->createOccurrence($earlyProfile, $now->copy()->addHour(), $now->copy()->addHours(2));
+        $this->createPartyOccurrence($lateProfile, $now->copy()->addHours(2), $now->copy()->addHours(3));
+
+        $this->createFavorite($liveProfile, $now->copy()->subMinutes(40));
+        $this->createFavorite($earlyProfile, $now->copy()->subMinutes(30));
+        $this->createFavorite($lateProfile, $now->copy()->subMinutes(20));
+        $this->createFavorite($plainProfile, $now->copy()->subMinutes(10));
+
+        $response = $this->getJson($this->favoritesUrl('?page=1&page_size=10'));
+
+        $response->assertOk();
+        $this->assertSame([
+            (string) $liveProfile->_id,
+            (string) $earlyProfile->_id,
+            (string) $lateProfile->_id,
+            (string) $plainProfile->_id,
+        ], array_map(
+            static fn (array $item): string => (string) $item['target_id'],
+            $response->json('items'),
+        ));
+        $response->assertJsonPath('has_more', false);
+    }
+
+    public function test_mounted_route_applies_deterministic_occurrence_and_favorite_tie_breakers(): void
+    {
+        config(['favorites.publicly_navigable_profile_types' => ['artist']]);
+        FavoriteEdge::query()->where('owner_user_id', (string) $this->owner->_id)->delete();
+
+        $firstNextProfile = $this->createProfile('First Tie Next Favorite');
+        $secondNextProfile = $this->createProfile('Second Tie Next Favorite');
+        $firstPlainProfile = $this->createProfile('First Tie Plain Favorite');
+        $secondPlainProfile = $this->createProfile('Second Tie Plain Favorite');
+        $now = Carbon::now();
+        $sameNextStart = $now->copy()->addHour();
+        $firstOccurrence = $this->createOccurrence(
+            $firstNextProfile,
+            $sameNextStart,
+            $now->copy()->addHours(2),
+        );
+        $secondOccurrence = $this->createOccurrence(
+            $secondNextProfile,
+            $sameNextStart,
+            $now->copy()->addHours(2),
+        );
+        $sameFavoriteTime = $now->copy()->subMinute();
+        $this->createFavorite($firstNextProfile, $sameFavoriteTime);
+        $this->createFavorite($secondNextProfile, $sameFavoriteTime);
+        $firstPlainFavorite = $this->createFavorite($firstPlainProfile, $sameFavoriteTime);
+        $secondPlainFavorite = $this->createFavorite($secondPlainProfile, $sameFavoriteTime);
+
+        $response = $this->getJson($this->favoritesUrl('?page=1&page_size=10'));
+
+        $response->assertOk();
+        $nextOrder = strcmp((string) $firstOccurrence->_id, (string) $secondOccurrence->_id) < 0
+            ? [(string) $firstNextProfile->_id, (string) $secondNextProfile->_id]
+            : [(string) $secondNextProfile->_id, (string) $firstNextProfile->_id];
+        $plainOrder = strcmp((string) $firstPlainFavorite->_id, (string) $secondPlainFavorite->_id) < 0
+            ? [(string) $firstPlainProfile->_id, (string) $secondPlainProfile->_id]
+            : [(string) $secondPlainProfile->_id, (string) $firstPlainProfile->_id];
+        $this->assertSame(
+            [...$nextOrder, ...$plainOrder],
+            array_map(
+                static fn (array $item): string => (string) $item['target_id'],
+                $response->json('items'),
+            ),
+        );
+    }
+
+    public function test_mounted_route_filters_inactive_deleted_and_malformed_targets_before_page_sentinel(): void
+    {
+        config(['favorites.publicly_navigable_profile_types' => ['artist']]);
+        FavoriteEdge::query()->where('owner_user_id', (string) $this->owner->_id)->delete();
+
+        $validProfile = $this->createProfile('Valid Favorite');
+        $inactiveProfile = $this->createProfile('Inactive Favorite');
+        $deletedProfile = $this->createProfile('Deleted Favorite');
+        $inactiveProfile->update(['is_active' => false]);
+        $deletedProfile->delete();
+
+        $this->createFavorite($inactiveProfile, now()->subMinutes(4));
+        $this->createFavorite($deletedProfile, now()->subMinutes(3));
+        FavoriteEdge::create([
+            'owner_user_id' => (string) $this->owner->_id,
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+            'target_id' => 'missing-profile',
+            'favorited_at' => now()->subMinutes(2),
+        ]);
+        $this->createFavorite($validProfile, now()->subMinute());
+
+        $page = $this->getJson($this->favoritesUrl('?page=1&page_size=1'));
+        $laterPage = $this->getJson($this->favoritesUrl('?page=2&page_size=1'));
+
+        $page->assertOk()
+            ->assertJsonCount(1, 'items')
+            ->assertJsonPath('items.0.target_id', (string) $validProfile->_id)
+            ->assertJsonPath('has_more', false);
+        $laterPage->assertOk()
+            ->assertExactJson([
+                'items' => [],
+                'has_more' => false,
+            ]);
+    }
+
     private function readSource(string $relativePath): string
     {
         $fullPath = base_path($relativePath);
@@ -258,6 +388,58 @@ class FavoriteDirectReadQueryContractTest extends TestCase
             'avatar_url' => "https://{$this->tenant->subdomain}.{$this->host}/{$slug}.png",
             'cover_url' => "https://{$this->tenant->subdomain}.{$this->host}/{$slug}-cover.png",
             'is_active' => true,
+        ]);
+    }
+
+    private function createFavorite(AccountProfile $profile, Carbon $favoritedAt): FavoriteEdge
+    {
+        return FavoriteEdge::create([
+            'owner_user_id' => (string) $this->owner->_id,
+            'registry_key' => 'account_profile',
+            'target_type' => 'account_profile',
+            'target_id' => (string) $profile->_id,
+            'favorited_at' => $favoritedAt,
+        ]);
+    }
+
+    private function createOccurrence(
+        AccountProfile $profile,
+        Carbon $startsAt,
+        Carbon $endsAt,
+    ): EventOccurrence {
+        return EventOccurrence::create([
+            'slug' => Str::slug((string) $profile->display_name).'-'.Str::lower(Str::random(8)),
+            'title' => (string) $profile->display_name,
+            'is_event_published' => true,
+            'starts_at' => $startsAt,
+            'effective_ends_at' => $endsAt,
+            'ends_at' => $endsAt,
+            'place_ref' => [
+                'type' => 'account_profile',
+                'id' => (string) $profile->_id,
+            ],
+        ]);
+    }
+
+    private function createPartyOccurrence(
+        AccountProfile $profile,
+        Carbon $startsAt,
+        Carbon $endsAt,
+    ): EventOccurrence {
+        return EventOccurrence::create([
+            'slug' => Str::slug((string) $profile->display_name).'-'.Str::lower(Str::random(8)),
+            'title' => (string) $profile->display_name,
+            'is_event_published' => true,
+            'starts_at' => $startsAt,
+            'effective_ends_at' => $endsAt,
+            'ends_at' => $endsAt,
+            'place_ref' => [
+                'type' => 'other',
+                'id' => 'unrelated-profile',
+            ],
+            'event_parties' => [
+                ['party_ref_id' => (string) $profile->_id],
+            ],
         ]);
     }
 
