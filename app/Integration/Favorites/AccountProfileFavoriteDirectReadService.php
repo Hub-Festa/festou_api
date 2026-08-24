@@ -176,9 +176,18 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 '$lookup' => [
                     'from' => 'event_occurrences',
                     'localField' => 'target_id',
-                    'foreignField' => 'place_ref._id',
+                    'foreignField' => 'place_ref.id',
                     'pipeline' => $this->buildOccurrenceStatePipeline($now, true),
                     'as' => 'direct_occurrence_state',
+                ],
+            ],
+            [
+                '$lookup' => [
+                    'from' => 'event_occurrences',
+                    'localField' => 'target_id',
+                    'foreignField' => 'place_ref._id',
+                    'pipeline' => $this->buildOccurrenceStatePipeline($now, true),
+                    'as' => 'legacy_direct_occurrence_state',
                 ],
             ],
             [
@@ -195,6 +204,9 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                     '__direct_occurrence_state' => [
                         '$arrayElemAt' => ['$direct_occurrence_state', 0],
                     ],
+                    '__legacy_direct_occurrence_state' => [
+                        '$arrayElemAt' => ['$legacy_direct_occurrence_state', 0],
+                    ],
                     '__party_occurrence_state' => [
                         '$arrayElemAt' => ['$party_occurrence_state', 0],
                     ],
@@ -205,12 +217,14 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                     '__live_now_candidates' => [
                         '$concatArrays' => [
                             ['$ifNull' => ['$__direct_occurrence_state.live_now', []]],
+                            ['$ifNull' => ['$__legacy_direct_occurrence_state.live_now', []]],
                             ['$ifNull' => ['$__party_occurrence_state.live_now', []]],
                         ],
                     ],
                     '__next_candidates' => [
                         '$concatArrays' => [
                             ['$ifNull' => ['$__direct_occurrence_state.next', []]],
+                            ['$ifNull' => ['$__legacy_direct_occurrence_state.next', []]],
                             ['$ifNull' => ['$__party_occurrence_state.next', []]],
                         ],
                     ],

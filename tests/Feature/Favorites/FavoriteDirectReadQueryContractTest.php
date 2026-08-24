@@ -187,6 +187,8 @@ class FavoriteDirectReadQueryContractTest extends TestCase
         $this->assertStringContainsString("'localField' => '__target_object_id'", $source);
         $this->assertStringContainsString("'foreignField' => '_id'", $source);
         $this->assertStringContainsString("'from' => 'event_occurrences'", $source);
+        $this->assertStringContainsString("'foreignField' => 'place_ref.id'", $source);
+        $this->assertStringContainsString("'foreignField' => 'place_ref._id'", $source);
         $this->assertStringContainsString("'__sort_block'", $source);
         $this->assertStringContainsString("'__sort_upcoming_at'", $source);
         $this->assertStringContainsString("\$match['place_ref.type'] = 'account_profile';", $source);
@@ -197,6 +199,22 @@ class FavoriteDirectReadQueryContractTest extends TestCase
         $this->assertStringNotContainsString("getAttribute('linked_account_profiles')", $source);
         $this->assertStringNotContainsString($removedVendorNamespace.'\\Favorites', $source);
         $this->assertStringNotContainsString($removedEventsNamespace, $source);
+    }
+
+    public function test_event_occurrence_public_agenda_indexes_match_downstream_parity_fields(): void
+    {
+        $source = $this->readSource(
+            'database/migrations/tenants/2026_08_24_000100_add_event_occurrence_public_agenda_indexes.php'
+        );
+        $removedVendorNamespace = $this->removedVendorNamespace();
+
+        $this->assertStringContainsString('idx_event_occurrences_public_agenda_place_ref_v1', $source);
+        $this->assertStringContainsString('idx_event_occurrences_public_agenda_party_ref_v1', $source);
+        $this->assertStringContainsString("'place_ref.type' => 1", $source);
+        $this->assertStringContainsString("'place_ref.id' => 1", $source);
+        $this->assertStringContainsString("'event_parties.party_ref_id' => 1", $source);
+        $this->assertStringContainsString("'effective_ends_at' => 1", $source);
+        $this->assertStringNotContainsString($removedVendorNamespace, $source);
     }
 
     public function test_favorites_integration_provider_binds_shared_contract_without_snapshot_rebuilds(): void
@@ -277,6 +295,35 @@ class FavoriteDirectReadQueryContractTest extends TestCase
             $response->json('items'),
         ));
         $response->assertJsonPath('has_more', false);
+    }
+
+    public function test_mounted_route_preserves_legacy_place_ref_id_compatibility_for_occurrence_rank(): void
+    {
+        config(['favorites.publicly_navigable_profile_types' => ['artist']]);
+        FavoriteEdge::query()->where('owner_user_id', (string) $this->owner->_id)->delete();
+
+        $legacyProfile = $this->createProfile('Legacy Place Ref Favorite');
+        $plainProfile = $this->createProfile('Plain Recent Favorite');
+        $now = Carbon::now();
+        $legacyOccurrence = $this->createLegacyPlaceRefOccurrence(
+            $legacyProfile,
+            $now->copy()->subHour(),
+            $now->copy()->addHour(),
+        );
+
+        $this->createFavorite($legacyProfile, $now->copy()->subMinutes(10));
+        $this->createFavorite($plainProfile, $now->copy()->subMinute());
+
+        $response = $this->getJson($this->favoritesUrl('?page=1&page_size=10'));
+
+        $response->assertOk();
+        $response->assertJsonPath('items.0.target_id', (string) $legacyProfile->_id);
+        $response->assertJsonPath(
+            'items.0.occurrence_state.live_now_event_occurrence_id',
+            (string) $legacyOccurrence->_id,
+        );
+        $response->assertJsonPath('items.0.navigation.kind', 'event');
+        $response->assertJsonPath('items.0.navigation.event_occurrence_id', (string) $legacyOccurrence->_id);
     }
 
     public function test_mounted_route_applies_deterministic_occurrence_and_favorite_tie_breakers(): void
@@ -420,6 +467,25 @@ class FavoriteDirectReadQueryContractTest extends TestCase
             'place_ref' => [
                 'type' => 'account_profile',
                 'id' => (string) $profile->_id,
+            ],
+        ]);
+    }
+
+    private function createLegacyPlaceRefOccurrence(
+        AccountProfile $profile,
+        Carbon $startsAt,
+        Carbon $endsAt,
+    ): EventOccurrence {
+        return EventOccurrence::create([
+            'slug' => Str::slug((string) $profile->display_name).'-'.Str::lower(Str::random(8)),
+            'title' => (string) $profile->display_name,
+            'is_event_published' => true,
+            'starts_at' => $startsAt,
+            'effective_ends_at' => $endsAt,
+            'ends_at' => $endsAt,
+            'place_ref' => [
+                'type' => 'account_profile',
+                '_id' => (string) $profile->_id,
             ],
         ]);
     }
