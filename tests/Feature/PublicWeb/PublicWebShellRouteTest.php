@@ -133,6 +133,23 @@ HTML);
         $this->assertStringContainsString('flutter_bootstrap.js', $html);
     }
 
+    public function testBootstrapTenantRoutesAcceptOneLabelAndExternalHostsButRejectNestedLandlordHosts(): void
+    {
+        $oneLabel = $this->getJson('http://tenant-shell.nginx/api/v1/environment');
+
+        $oneLabel->assertOk()
+            ->assertJsonPath('subdomain', 'tenant-shell');
+
+        $external = $this->getJson('http://tenant-shell.external.test/api/v1/environment');
+
+        $external->assertOk()
+            ->assertJsonPath('subdomain', 'tenant-shell');
+
+        $nested = $this->getJson('http://platform-test.extra.nginx/api/v1/environment');
+
+        $nested->assertNotFound();
+    }
+
     public function testPartnerRouteReturnsRichMetadataFromLocalAccountProfile(): void
     {
         config([

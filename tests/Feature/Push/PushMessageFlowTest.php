@@ -1049,6 +1049,21 @@ class PushMessageFlowTest extends TestCase
         $response->assertNotFound();
     }
 
+    public function testPushTenantRoutesAcceptDottedExternalCustomDomain(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $externalHost = 'tenant-zeta-' . Str::lower(Str::random(8)) . '.external.test';
+
+        $tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+            'path' => $externalHost,
+        ]);
+
+        $response = $this->getJson("http://{$externalHost}/api/v1/settings/push");
+
+        $response->assertUnauthorized();
+    }
+
     public function testPushLandlordRoutesAreNotAvailableOnTenantHost(): void
     {
         $tenant = Tenant::query()->firstOrFail();
