@@ -135,16 +135,34 @@ HTML);
 
     public function testBootstrapTenantRoutesAcceptOneLabelAndExternalHostsButRejectNestedLandlordHosts(): void
     {
+        $tenant = Tenant::query()->firstOrFail();
+        $externalHost = 'tenant-shell.external.test';
+
+        $tenant->domains()
+            ->withTrashed()
+            ->where('path', $externalHost)
+            ->get()
+            ->each
+            ->forceDelete();
+        $tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+            'path' => $externalHost,
+        ]);
+        $tenant->forgetCurrent();
+
         $oneLabel = $this->getJson('http://tenant-shell.nginx/api/v1/environment');
 
         $oneLabel->assertOk()
             ->assertJsonPath('subdomain', 'tenant-shell');
 
+        $tenant->forgetCurrent();
         $external = $this->getJson('http://tenant-shell.external.test/api/v1/environment');
 
         $external->assertOk()
             ->assertJsonPath('subdomain', 'tenant-shell');
+        $this->assertContains($externalHost, $external->json('domains'));
 
+        $tenant->forgetCurrent();
         $nested = $this->getJson('http://platform-test.extra.nginx/api/v1/environment');
 
         $nested->assertNotFound();

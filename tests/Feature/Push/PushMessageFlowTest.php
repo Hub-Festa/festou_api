@@ -1058,6 +1058,7 @@ class PushMessageFlowTest extends TestCase
             'type' => Tenant::DOMAIN_TYPE_WEB,
             'path' => $externalHost,
         ]);
+        $tenant->forgetCurrent();
 
         $response = $this->getJson("http://{$externalHost}/api/v1/settings/push");
 
