@@ -335,6 +335,44 @@ class PushMessageFlowTest extends TestCase
         $this->assertEquals(1, $metrics['unique_clicked_count'] ?? 0);
     }
 
+    public function testPushMessageActionsDeduplicateAllLifecycleActions(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $this->postJson($this->baseUrl, $payload)->assertCreated();
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $actions = [
+            ['action' => 'opened', 'step_index' => 0],
+            ['action' => 'dismissed', 'step_index' => 0],
+            ['action' => 'step_viewed', 'step_index' => 1],
+            ['action' => 'delivered', 'step_index' => 0],
+        ];
+
+        foreach ($actions as $action) {
+            $action['idempotency_key'] = 'dedupe:' . $action['action'] . ':' . $messageId;
+            $url = $this->baseUrl . '/' . $messageId . '/actions';
+
+            $this->postJson($url, $action)->assertOk();
+            $this->postJson($url, $action)->assertOk();
+        }
+
+        $message = PushMessage::query()->find($messageId);
+        $this->assertNotNull($message);
+        $metrics = $message->metrics ?? [];
+        $this->assertEquals(1, $metrics['opened_count'] ?? 0);
+        $this->assertEquals(1, $metrics['dismissed_count'] ?? 0);
+        $this->assertEquals(1, $metrics['step_view_counts'][1] ?? 0);
+        $this->assertEquals(1, $metrics['delivered_count'] ?? 0);
+    }
+
     public function testPushMessageActionsRecordOpenedMetrics(): void
     {
         $this->actingAsOperator();
@@ -480,6 +518,29 @@ class PushMessageFlowTest extends TestCase
 
         $action->assertStatus(422);
         $action->assertJsonValidationErrors(['step_index']);
+    }
+
+    public function testPushMessageActionsRequireIdempotencyKey(): void
+    {
+        $this->actingAsOperator();
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'users',
+                'user_ids' => [(string) $this->operator->_id],
+            ],
+        ]);
+
+        $this->postJson($this->baseUrl, $payload)->assertCreated();
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $action = $this->postJson($this->baseUrl . '/' . $messageId . '/actions', [
+            'action' => 'opened',
+            'step_index' => 0,
+        ]);
+
+        $action->assertStatus(422);
+        $action->assertJsonValidationErrors(['idempotency_key']);
     }
 
     public function testPushMessageActionsClickedRequiresButtonKey(): void
@@ -1344,6 +1405,38 @@ class PushMessageFlowTest extends TestCase
         ]);
         $update->assertOk();
         $update->assertJsonPath('data.body_template', 'Tenant update');
+    }
+
+    public function testTenantMessageDataAndActionsRecordMetricsForEligibleUser(): void
+    {
+        Sanctum::actingAs($this->operator, [
+            'tenant-push-messages:read',
+            'tenant-push-messages:create',
+        ]);
+
+        $payload = $this->buildPayload([
+            'audience' => [
+                'type' => 'all',
+            ],
+        ]);
+
+        $this->postJson('api/v1/push/messages', $payload)->assertCreated();
+        $messageId = $this->resolveMessageId($payload['internal_name']);
+
+        $data = $this->getJson('api/v1/push/messages/' . $messageId . '/data');
+        $data->assertOk();
+        $data->assertJsonPath('ok', true);
+
+        $action = $this->postJson('api/v1/push/messages/' . $messageId . '/actions', [
+            'action' => 'step_viewed',
+            'step_index' => 1,
+            'idempotency_key' => 'tenant-step-viewed:' . $messageId,
+        ]);
+        $action->assertOk();
+
+        $message = PushMessage::query()->find($messageId);
+        $this->assertNotNull($message);
+        $this->assertEquals(1, ($message->metrics ?? [])['step_view_counts'][1] ?? 0);
     }
 
     public function testTenantMessageDataForbiddenWhenNotEligible(): void

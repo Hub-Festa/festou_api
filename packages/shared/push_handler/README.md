@@ -98,7 +98,7 @@ Endpoints:
 
 Auth/middleware:
 - CRUD: `auth:sanctum` + `account` + abilities
-- `/data` + `/actions`: `InitializeAccount` (anonymous token allowed)
+- `/data` + `/actions`: `auth:sanctum` + `account` (the bearer identity must have access to the account)
 
 ### Tenant Routes
 Mounted under:
