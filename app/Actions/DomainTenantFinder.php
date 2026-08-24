@@ -61,21 +61,16 @@ class DomainTenantFinder extends TenantFinder
 
     protected function findTenantBySubdomain(): ?IsTenant
     {
-        $parts_request = explode('.', request()->getHost());
-        $subdomain = $parts_request[0];
+        $subdomain = $this->resolveRequestSubdomain();
+        if ($subdomain === null) {
+            return null;
+        }
 
         return app(IsTenant::class)::where('subdomain', $subdomain)->first();
     }
 
     protected function isRequestFromSubdomain(): bool {
-        $host = $this->normalizedHost(request()->getHost());
-        $landlordHost = $this->landlordHost();
-
-        if ($host === null || $landlordHost === null || $host === $landlordHost) {
-            return false;
-        }
-
-        return str_ends_with($host, '.' . $landlordHost);
+        return $this->resolveRequestSubdomain() !== null;
     }
 
     protected function isRequestFromLandlordHost(): bool
@@ -110,6 +105,28 @@ class DomainTenantFinder extends TenantFinder
         $normalized = trim(strtolower($host));
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function resolveRequestSubdomain(): ?string
+    {
+        $host = $this->normalizedHost(request()->getHost());
+        $landlordHost = $this->landlordHost();
+
+        if ($host === null || $landlordHost === null || $host === $landlordHost) {
+            return null;
+        }
+
+        $suffix = '.' . $landlordHost;
+        if (! str_ends_with($host, $suffix)) {
+            return null;
+        }
+
+        $subdomain = substr($host, 0, -strlen($suffix));
+        if ($subdomain === '' || str_contains($subdomain, '.')) {
+            return null;
+        }
+
+        return $subdomain;
     }
 
     private function resolveAppDomainFromRequest(): ?string

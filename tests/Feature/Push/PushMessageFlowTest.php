@@ -1042,6 +1042,13 @@ class PushMessageFlowTest extends TestCase
         $response->assertNotFound();
     }
 
+    public function testPushTenantRoutesRejectNestedLandlordSubdomain(): void
+    {
+        $response = $this->getJson('http://platform-test.extra.' . $this->host . '/api/v1/settings/push');
+
+        $response->assertNotFound();
+    }
+
     public function testPushLandlordRoutesAreNotAvailableOnTenantHost(): void
     {
         $tenant = Tenant::query()->firstOrFail();

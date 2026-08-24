@@ -39,9 +39,10 @@ return Application::configure(basePath: dirname(__DIR__))
                 $mainHost = (string) config('app.url');
             }
             $mainHost = trim($mainHost);
+            $escapedMainHost = preg_quote($mainHost, '/');
             $tenantDomainPattern = $mainHost === ''
                 ? '.+'
-                : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+                : '^(?!' . $escapedMainHost . '$)(?!(?:[^.]+\.){2,}' . $escapedMainHost . '$).+';
 
             Route::domain($mainHost)->group(function () use ($registerProjectRoutes): void {
                 Route::prefix('admin/api/v1')

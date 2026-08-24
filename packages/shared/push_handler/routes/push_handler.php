@@ -37,9 +37,11 @@ $mainHost = parse_url((string) config('app.url'), PHP_URL_HOST);
 if (! is_string($mainHost) || $mainHost === '') {
     $mainHost = trim((string) config('app.url'));
 }
+$mainHost = trim($mainHost);
+$escapedMainHost = preg_quote($mainHost, '/');
 $tenantDomainPattern = $mainHost === ''
     ? '.+'
-    : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+    : '^(?!' . $escapedMainHost . '$)(?!(?:[^.]+\.){2,}' . $escapedMainHost . '$).+';
 
 Route::domain('{tenant_domain}')
     ->where(['tenant_domain' => $tenantDomainPattern])

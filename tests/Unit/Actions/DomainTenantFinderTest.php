@@ -42,6 +42,47 @@ class DomainTenantFinderTest extends TestCase
         $this->assertSame($tenant, $result);
     }
 
+    public function test_does_not_treat_nested_landlord_host_as_a_tenant_subdomain(): void
+    {
+        $landlordHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (! is_string($landlordHost) || trim($landlordHost) === '') {
+            $landlordHost = trim(str_replace(['https://', 'http://'], '', (string) config('app.url')), '/');
+        }
+
+        $nestedHost = 'platform-test.extra.' . $landlordHost;
+        $tenant = Tenant::make([
+            'name' => 'Nested Host Fallback Tenant',
+            'subdomain' => 'nested-host-fallback',
+        ]);
+
+        $this->instance(
+            TenantDomainResolverService::class,
+            $this->mock(TenantDomainResolverService::class, function (MockInterface $mock) use ($nestedHost, $tenant): void {
+                $mock->shouldReceive('findTenantByDomain')
+                    ->once()
+                    ->with($nestedHost)
+                    ->andReturn($tenant);
+            })
+        );
+
+        $this->instance(
+            TenantAppDomainResolverService::class,
+            $this->mock(TenantAppDomainResolverService::class, function (MockInterface $mock): void {
+                $mock->shouldReceive('findTenantByIdentifier')->never();
+            })
+        );
+
+        $finder = $this->app->make(DomainTenantFinder::class);
+        $request = Request::create('https://' . $nestedHost . '/api/v1/environment', 'GET');
+        $this->app->instance('request', $request);
+
+        $isSubdomain = new \ReflectionMethod(DomainTenantFinder::class, 'isRequestFromSubdomain');
+        $isSubdomain->setAccessible(true);
+
+        $this->assertFalse($isSubdomain->invoke($finder));
+        $this->assertSame($tenant, $finder->findForRequest($request));
+    }
+
     public function test_falls_back_to_web_domain_when_subdomain_resolution_returns_null(): void
     {
         $tenant = Tenant::make([
