@@ -135,9 +135,15 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                 ],
             ],
             [
+                '$set' => [
+                    '__target_object_id' => $this->asObjectIdExpression('$target_id'),
+                ],
+            ],
+            [
                 '$lookup' => [
                     'from' => 'account_profiles',
-                    'let' => ['profileId' => '$target_id'],
+                    'localField' => '__target_object_id',
+                    'foreignField' => '_id',
                     'pipeline' => [
                         [
                             '$match' => [
@@ -147,12 +153,6 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                                     ['is_active' => ['$exists' => false]],
                                 ],
                                 'deleted_at' => null,
-                                '$expr' => [
-                                    '$eq' => [
-                                        $this->asStringExpression('$_id'),
-                                        $this->asStringExpression('$$profileId'),
-                                    ],
-                                ],
                             ],
                         ],
                         [
@@ -362,6 +362,18 @@ class AccountProfileFavoriteDirectReadService implements AccountProfileFavoriteD
                         ['$limit' => 1],
                     ],
                 ],
+            ],
+        ];
+    }
+
+    private function asObjectIdExpression(string $field): array
+    {
+        return [
+            '$convert' => [
+                'input' => $field,
+                'to' => 'objectId',
+                'onError' => null,
+                'onNull' => null,
             ],
         ];
     }

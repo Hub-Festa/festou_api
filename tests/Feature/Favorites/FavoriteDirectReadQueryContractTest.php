@@ -184,12 +184,15 @@ class FavoriteDirectReadQueryContractTest extends TestCase
         $this->assertStringContainsString('use App\\Models\\Tenants\\EventOccurrence;', $source);
         $this->assertStringContainsString('use Shared\\Favorites\\Models\\Tenants\\FavoriteEdge;', $source);
         $this->assertStringContainsString("'from' => 'account_profiles'", $source);
+        $this->assertStringContainsString("'localField' => '__target_object_id'", $source);
+        $this->assertStringContainsString("'foreignField' => '_id'", $source);
         $this->assertStringContainsString("'from' => 'event_occurrences'", $source);
         $this->assertStringContainsString("'__sort_block'", $source);
         $this->assertStringContainsString("'__sort_upcoming_at'", $source);
-        $this->assertStringContainsString("where('place_ref.type', 'account_profile')", $source);
+        $this->assertStringContainsString("\$match['place_ref.type'] = 'account_profile';", $source);
         $this->assertStringContainsString("'party_ref_id' => ['\$in' => \$profileIdCandidates]", $source);
         $this->assertStringNotContainsString("->get(['_id', 'target_id', 'favorited_at'])", $source);
+        $this->assertStringNotContainsString("'let' => ['profileId' => '\$target_id']", $source);
         $this->assertStringNotContainsString("getAttribute('artists')", $source);
         $this->assertStringNotContainsString("getAttribute('linked_account_profiles')", $source);
         $this->assertStringNotContainsString($removedVendorNamespace.'\\Favorites', $source);
