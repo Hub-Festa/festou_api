@@ -115,9 +115,10 @@ HTML);
     {
         $runtimeShellPath = '/opt/web-shell/index.html';
 
-        if (! is_file($runtimeShellPath)) {
-            $this->markTestSkipped('The generic runtime shell mount exists only inside the Docker app container.');
-        }
+        $this->assertFileExists(
+            $runtimeShellPath,
+            'The Docker app must expose the canonical generic runtime shell mount.'
+        );
 
         $this->setShellPathOverride($runtimeShellPath);
 

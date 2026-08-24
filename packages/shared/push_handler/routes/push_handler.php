@@ -1,7 +1,6 @@
 <?php
 
 use App\Http\Middleware\CheckTenantAccess;
-use App\Http\Middleware\InitializeAccount;
 use Shared\PushHandler\Http\Controllers\Account\PushMessageActionController;
 use Shared\PushHandler\Http\Controllers\Account\PushMessageController;
 use Shared\PushHandler\Http\Controllers\Account\PushMessageDataController;
@@ -34,7 +33,26 @@ $tenantSettingsPushPath = $tenantRoutes['settings_push'] ?? 'push';
 $landlordPrefix = $landlordRoutes['prefix'] ?? 'admin/api/v1';
 $landlordTenantSettingsPath = $landlordRoutes['tenant_settings_path'] ?? '{tenant_slug}/settings/push';
 
-Route::prefix($accountPrefix)
+$mainHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+if (! is_string($mainHost) || $mainHost === '') {
+    $mainHost = trim((string) config('app.url'));
+}
+$tenantDomainPattern = $mainHost === ''
+    ? '.+'
+    : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+
+Route::domain('{tenant_domain}')
+    ->where(['tenant_domain' => $tenantDomainPattern])
+    ->group(function () use (
+        $accountPrefix,
+        $accountMessagesPrefix,
+        $tenantPrefix,
+        $tenantRegisterPath,
+        $tenantUnregisterPath,
+        $tenantSettingsPrefix,
+        $tenantSettingsPushPath
+    ): void {
+        Route::prefix($accountPrefix)
     ->middleware(['tenant'])
     ->group(function () use ($accountMessagesPrefix) {
         Route::middleware('auth:sanctum')
@@ -56,16 +74,16 @@ Route::prefix($accountPrefix)
                             ->middleware('account', 'abilities:push-messages:delete');
 
                         Route::get('/{push_message_id}/data', [PushMessageDataController::class, 'show'])
-                            ->middleware(InitializeAccount::class);
+                            ->middleware('account');
                         Route::post('/{push_message_id}/actions', [PushMessageActionController::class, 'store'])
-                            ->middleware(InitializeAccount::class);
+                            ->middleware('account');
                         Route::post('/{push_message_id}/send', PushMessageSendController::class)
                             ->middleware('account', 'abilities:push-messages:send');
                     });
             });
     });
 
-Route::prefix($tenantPrefix)
+        Route::prefix($tenantPrefix)
     ->middleware(['tenant'])
     ->group(function () use (
         $tenantRegisterPath,
@@ -117,13 +135,17 @@ Route::prefix($tenantPrefix)
                         ->middleware('abilities:tenant-push-credentials:update');
                 });
             });
+        });
     });
 
-Route::prefix($landlordPrefix)
+Route::domain($mainHost)
+    ->group(function () use ($landlordPrefix, $landlordTenantSettingsPath): void {
+        Route::prefix($landlordPrefix)
     ->middleware(['landlord'])
     ->group(function () use ($landlordTenantSettingsPath) {
         Route::get('/' . ltrim($landlordTenantSettingsPath, '/'), [TenantPushSettingsAdminController::class, 'show'])
             ->middleware('auth:sanctum', 'abilities:push-settings:update');
         Route::patch('/' . ltrim($landlordTenantSettingsPath, '/'), [TenantPushSettingsAdminController::class, 'update'])
             ->middleware('auth:sanctum', 'abilities:push-settings:update');
+        });
     });

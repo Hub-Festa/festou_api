@@ -152,6 +152,36 @@ class PushMessageFlowTest extends TestCase
         $data->assertJsonPath('push_message_id', $messageId);
     }
 
+    public function testAccountPushDataAndActionsRequireAccountAccess(): void
+    {
+        $otherAccount = Account::create([
+            'name' => 'Push Other Account',
+            'document' => strtoupper(Str::random(14)),
+        ]);
+
+        $message = PushMessage::create(array_replace($this->buildPayload(), [
+            'scope' => 'account',
+            'account_id' => (string) $otherAccount->_id,
+        ]));
+
+        $this->actingAsOperator();
+        $otherAccountUrl = sprintf(
+            'api/v1/accounts/%s/push/messages/%s',
+            $otherAccount->slug,
+            (string) $message->_id
+        );
+
+        $data = $this->getJson($otherAccountUrl . '/data');
+        $data->assertStatus(401);
+
+        $action = $this->postJson($otherAccountUrl . '/actions', [
+            'action' => 'opened',
+            'step_index' => 0,
+            'idempotency_key' => 'opened:' . (string) $message->_id,
+        ]);
+        $action->assertStatus(401);
+    }
+
     public function testPushMessageDataForbiddenWhenNotInAudience(): void
     {
         $this->actingAsOperator();
@@ -891,6 +921,138 @@ class PushMessageFlowTest extends TestCase
         $response->assertJsonPath('data.push_message_routes.0.path_params.0', 'slug');
     }
 
+    public function testLandlordTenantPushSettingsRequiresTargetTenantAccess(): void
+    {
+        $primaryTenant = Tenant::query()->firstOrFail();
+        $secondaryTenant = Tenant::create([
+            'name' => 'Unauthorized Push Settings Tenant',
+            'subdomain' => 'unauthorized-push-' . Str::lower(Str::random(8)),
+            'domains' => [],
+        ]);
+
+        $primaryTenant->makeCurrent();
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $response = $this->getJson(
+            "http://{$this->host}/admin/api/v1/{$secondaryTenant->slug}/settings/push"
+        );
+
+        $response->assertStatus(403);
+    }
+
+    public function testLandlordTenantPushSettingsAllowsAuthorizedTargetTenant(): void
+    {
+        $primaryTenant = Tenant::query()->firstOrFail();
+        $targetTenant = Tenant::create([
+            'name' => 'Authorized Push Settings Tenant',
+            'subdomain' => 'authorized-push-' . Str::lower(Str::random(8)),
+            'domains' => [],
+        ]);
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        $landlordUser->tenantRoles()->create([
+            'tenant_id' => (string) $targetTenant->_id,
+            'name' => 'Authorized Push Settings Access',
+            'permissions' => ['push-settings:update'],
+        ]);
+        $landlordUser = $landlordUser->fresh();
+
+        $targetTenant->makeCurrent();
+        TenantPushSettings::create([
+            'max_ttl_days' => 11,
+            'push_message_types' => [['key' => 'target', 'label' => 'Target']],
+        ]);
+        $primaryTenant->makeCurrent();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $response = $this->getJson(
+            "http://{$this->host}/admin/api/v1/{$targetTenant->slug}/settings/push"
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('data.max_ttl_days', 11)
+            ->assertJsonPath('data.push_message_types.0.key', 'target');
+    }
+
+    public function testLandlordTenantPushSettingsRejectsUnauthorizedUpdateWithoutChangingTargetTenant(): void
+    {
+        $primaryTenant = Tenant::query()->firstOrFail();
+        $secondaryTenant = Tenant::create([
+            'name' => 'Unauthorized Push Update Tenant',
+            'subdomain' => 'unauthorized-push-update-' . Str::lower(Str::random(8)),
+            'domains' => [],
+        ]);
+
+        $secondaryTenant->makeCurrent();
+        TenantPushSettings::create([
+            'max_ttl_days' => 7,
+            'push_message_types' => [['key' => 'existing', 'label' => 'Existing']],
+        ]);
+        $secondaryTenant->forgetCurrent();
+
+        $primaryTenant->makeCurrent();
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $response = $this->patchJson(
+            "http://{$this->host}/admin/api/v1/{$secondaryTenant->slug}/settings/push",
+            [
+                'max_ttl_days' => 30,
+                'push_message_types' => [['key' => 'blocked', 'label' => 'Blocked']],
+            ]
+        );
+
+        $response->assertStatus(403);
+
+        $secondaryTenant->makeCurrent();
+        $this->assertSame(7, TenantPushSettings::current()?->max_ttl_days);
+    }
+
+    public function testLandlordTenantPushSettingsAllowsAuthorizedUpdateAndPersistsTargetTenant(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->makeCurrent();
+
+        $landlordUser = LandlordUser::query()->firstOrFail();
+        Sanctum::actingAs($landlordUser, ['push-settings:update']);
+
+        $response = $this->patchJson(
+            "http://{$this->host}/admin/api/v1/{$tenant->slug}/settings/push",
+            [
+                'max_ttl_days' => 30,
+                'push_message_types' => [['key' => 'authorized', 'label' => 'Authorized']],
+            ]
+        );
+
+        $response->assertOk()
+            ->assertJsonPath('data.max_ttl_days', 30)
+            ->assertJsonPath('data.push_message_types.0.key', 'authorized');
+
+        $tenant->makeCurrent();
+        $settings = TenantPushSettings::current();
+        $this->assertNotNull($settings);
+        $this->assertSame(30, $settings->max_ttl_days);
+        $this->assertSame('authorized', $settings->push_message_types[0]['key']);
+    }
+
+    public function testPushTenantRoutesAreNotAvailableOnLandlordHost(): void
+    {
+        $response = $this->getJson("http://{$this->host}/api/v1/settings/push");
+
+        $response->assertNotFound();
+    }
+
+    public function testPushLandlordRoutesAreNotAvailableOnTenantHost(): void
+    {
+        $tenant = Tenant::query()->firstOrFail();
+
+        $response = $this->getJson(
+            "http://{$tenant->subdomain}.{$this->host}/admin/api/v1/{$tenant->slug}/settings/push"
+        );
+
+        $response->assertNotFound();
+    }
+
     public function testTenantPushSettingsAcceptsTelemetryIntegrations(): void
     {
         $tenant = Tenant::query()->firstOrFail();
@@ -1344,7 +1506,27 @@ class PushMessageFlowTest extends TestCase
             'private_key' => 'updated-secret',
         ]);
 
-        $update->assertOk();
+        $update->assertOk()
+            ->assertJsonPath('data.project_id', 'project-id')
+            ->assertJsonPath('data.client_email', 'client@example.org');
+
+        $updatedStored = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('push_credentials')
+            ->findOne(['_id' => new \MongoDB\BSON\ObjectId($credentialId)]);
+        $this->assertNotNull($updatedStored);
+        $this->assertSame('project-id', (string) ($updatedStored['project_id'] ?? ''));
+        $this->assertSame('client@example.org', (string) ($updatedStored['client_email'] ?? ''));
+        $this->assertNotSame('secret', (string) ($updatedStored['private_key'] ?? ''));
+
+        $delete = $this->deleteJson('api/v1/settings/push/credentials/' . $credentialId);
+        $delete->assertOk()->assertJsonPath('ok', true);
+
+        $deletedStored = DB::connection('tenant')
+            ->getDatabase()
+            ->selectCollection('push_credentials')
+            ->findOne(['_id' => new \MongoDB\BSON\ObjectId($credentialId)]);
+        $this->assertNull($deletedStored);
     }
 
     public function testTenantCredentialsIndexReturnsWithoutPrivateKey(): void

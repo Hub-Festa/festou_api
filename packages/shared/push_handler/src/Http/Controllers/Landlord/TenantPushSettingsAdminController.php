@@ -4,16 +4,18 @@ declare(strict_types=1);
 
 namespace Shared\PushHandler\Http\Controllers\Landlord;
 
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use Shared\PushHandler\Http\Requests\TenantPushSettingsRequest;
 use Shared\PushHandler\Models\Tenants\TenantPushSettings;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class TenantPushSettingsAdminController
 {
-    public function show(string $tenant_slug): JsonResponse
+    public function show(Request $request, string $tenant_slug): JsonResponse
     {
-        $tenant = Tenant::query()->where('slug', $tenant_slug)->firstOrFail();
+        $tenant = $this->authorizedTenant($request, $tenant_slug);
         $tenant->makeCurrent();
 
         $settings = TenantPushSettings::current();
@@ -25,7 +27,7 @@ class TenantPushSettingsAdminController
 
     public function update(TenantPushSettingsRequest $request, string $tenant_slug): JsonResponse
     {
-        $tenant = Tenant::query()->where('slug', $tenant_slug)->firstOrFail();
+        $tenant = $this->authorizedTenant($request, $tenant_slug);
         $tenant->makeCurrent();
 
         $payload = $request->validated();
@@ -44,6 +46,20 @@ class TenantPushSettingsAdminController
         $tenant->forgetCurrent();
 
         return response()->json(['data' => $settings]);
+    }
+
+    private function authorizedTenant(Request $request, string $tenantSlug): Tenant
+    {
+        $tenant = Tenant::query()->where('slug', $tenantSlug)->firstOrFail();
+        $user = $request->user();
+
+        abort_unless(
+            $user instanceof LandlordUser
+                && in_array((string) $tenant->_id, $user->getAccessToIds(), true),
+            403
+        );
+
+        return $tenant;
     }
 
     /**
