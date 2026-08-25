@@ -6,49 +6,55 @@
          colors="true"
 >
     <testsuites>
+        <testsuite name="Feature-Initialization">
+            <directory>tests/Feature/Initialization</directory>
+        </testsuite>
+        <testsuite name="Feature-Landlord">
+            <directory>tests/Feature/Landlord</directory>
+        </testsuite>
+        <testsuite name="Feature-Accounts">
+            <directory>tests/Feature/Accounts</directory>
+        </testsuite>
+        <testsuite name="Feature-Tenants">
+            <directory>tests/Feature/Tenants</directory>
+        </testsuite>
+        <testsuite name="Feature-Push">
+            <directory>tests/Feature/Push</directory>
+        </testsuite>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
         <testsuite name="Initialization">
-            <file>tests/Api/default/Initialization/ApiDefaultInitializeTest.php</file>
+            <file>tests/Api/v1/Initialization/ApiV1InitializeTest.php</file>
         </testsuite>
-        <testsuite name="Api-Default-Admin">
-            <file>tests/Api/default/Admin/ApiDefaultAdminValidationTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminRolesTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminUserTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminAuthTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminProfileTest.php</file>
-            <file>tests/Api/default/Admin/ApiDefaultAdminTenantTest.php</file>
+        <testsuite name="Api-v1-Admin">
+            <file>tests/Api/v1/Admin/ApiV1AdminValidationTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminRolesTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminUserTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminAuthTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminProfileTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1AdminTenantTest.php</file>
+            <file>tests/Api/v1/Admin/ApiV1BrandingAdminTest.php</file>
         </testsuite>
-        <testsuite name="Api-Default-Tenant">
-            <directory>tests/Api/default/Tenants/Roles</directory>
-            <directory>tests/Api/default/Tenants/Users</directory>
-            <directory>tests/Api/default/Tenants/Account</directory>
+        <testsuite name="Api-v1-Tenant">
+            <directory>tests/Api/v1/Tenants/Roles</directory>
+            <directory>tests/Api/v1/Tenants/Users</directory>
+            <directory>tests/Api/v1/Tenants/Account</directory>
+            <directory>tests/Api/v1/Tenants/Branding</directory>
+            <directory>tests/Api/v1/Tenants/Auth</directory>
         </testsuite>
-        <testsuite name="Api-Default-Account">
-            <directory>tests/Api/default/Accounts/Roles</directory>
-            <directory>tests/Api/default/Accounts/Users</directory>
-            <directory>tests/Api/default/Accounts/Auth</directory>
-            <directory>tests/Api/default/Accounts/Profile</directory>
-            <directory>tests/Api/default/Accounts/Validation</directory>
+        <testsuite name="Api-v1-Account">
+            <directory>tests/Api/v1/Accounts/Roles</directory>
+            <directory>tests/Api/v1/Accounts/Users</directory>
+            <directory>tests/Api/v1/Accounts/Auth</directory>
+            <directory>tests/Api/v1/Accounts/Profile</directory>
+            <directory>tests/Api/v1/Accounts/Validation</directory>
         </testsuite>
-        <testsuite name="Api-Default-Middleware">
-            <file>tests/Api/default/Admin/ApiDefaultAdminMiddlewareTest.php</file>
-            <directory>tests/Api/default/Tenants/Middleware</directory>
-            <directory>tests/Api/default/Accounts/Middleware</directory>
+        <testsuite name="Api-v1-Middleware">
+            <file>tests/Api/v1/Admin/ApiV1AdminMiddlewareTest.php</file>
+            <directory>tests/Api/v1/Tenants/Middleware</directory>
+            <directory>tests/Api/v1/Accounts/Middleware</directory>
         </testsuite>
-
-
-<!--        <testsuite name="Api-V1">-->
-<!--            <file>tests/Api/v1/ApiV1TokenGenerateTest.php</file>-->
-<!--            <file>tests/Api/v1/ApiV1PaymentSettingsIuguTest.php</file>-->
-<!--            <file>tests/Api/v1/ApiV1OrdersCreationTest.php</file>-->
-<!--            <file>tests/Api/v1/ApiV1WebhookTest.php</file>-->
-<!--        </testsuite>-->
-<!--        <testsuite name="Api-V2">-->
-<!--            <file>tests/Api/v2/ApiV2TokenGenerateTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2PaymentSettingsIuguTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2OrdersValidationTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2OrdersCreationTest.php</file>-->
-<!--            <file>tests/Api/v2/ApiV2WebhookTest.php</file>-->
-<!--        </testsuite>-->
     </testsuites>
     <source>
         <include>
@@ -57,13 +63,20 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <env name="APP_URL" value="http://nginx" />
+        <env name="APP_HOST" value="nginx" />
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
+        <env name="DEEP_LINK_ROUTE_POLICY_CONFIG_FILE" value="tests/Fixtures/DeepLinks/project_deep_link_route_policy_belluga.php"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="PUBLIC_WEB_PROJECT_ROUTE_CONFIG_FILE" value="tests/Fixtures/PublicWeb/project_public_shell_routes.php"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="DB_DATABASE" value="landlord_test" />
+        <env name="DB_DATABASE_LANDLORD" value="landlord_test" />
+        <env name="DB_DATABASE_TENANTS" value="tenants_test" />
     </php>
 </phpunit>

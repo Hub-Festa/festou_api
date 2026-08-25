@@ -30,7 +30,17 @@ class TenantLabels extends Labels {
     }
 
     public string $subdomain {
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".subdomain", $value);
+            $this->subdomain = $value;
+        }
         get {
+            $persistedSubdomain = $this->getGlobal($this->base_label . ".subdomain");
+
+            if ($persistedSubdomain) {
+                return $persistedSubdomain;
+            }
+
             return Str::slug($this->name);
         }
     }
@@ -47,7 +57,46 @@ class TenantLabels extends Labels {
 
     public string $base_api_url {
         get {
-            return "http://$this->subdomain.localhost/api/";
+            return "http://$this->subdomain.".env('APP_HOST')."/api/v1/";
+        }
+    }
+
+    public string $base_url {
+        get {
+            return "http://$this->subdomain.".env('APP_HOST')."/";
+        }
+    }
+
+    public string $theme_brightness_default {
+        get{
+            return $this->getGlobal($this->base_label. ".theme_brightness_default");
+        }
+
+        set(string $value) {
+            $this->setGlobal($this->base_label. ".theme_brightness_default", $value);
+            $this->theme_brightness_default = $value;
+        }
+    }
+
+    public string $theme_primary_seed_color {
+        get{
+            return $this->getGlobal($this->base_label. ".theme_primary_seed_color");
+        }
+
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".theme_primary_seed_color", $value);
+            $this->theme_primary_seed_color = $value;
+        }
+    }
+
+    public string $theme_secondary_seed_color {
+        get{
+            return $this->getGlobal($this->base_label. ".theme_secondary_seed_color");
+        }
+
+        set(string $value) {
+            $this->setGlobal($this->base_label . ".theme_secondary_seed_color", $value);
+            $this->theme_secondary_seed_color = $value;
         }
     }
 
@@ -145,6 +194,22 @@ class TenantLabels extends Labels {
                 $this->base_label.".accounts.disposable"
             );
         }
+    }
+
+    public function toArray(): array
+    {
+        return [
+            "id" => $this->id,
+            "name" => $this->name,
+            "subdomain" => $this->subdomain,
+            "slug" => $this->slug,
+            "base_api_url" => $this->base_api_url,
+            "users" => [
+                "admin" => $this->user_admin->toArray(),
+                "roles_manager" => $this->user_roles_manager->toArray(),
+                "users_manager" => $this->user_users_manager->toArray(),
+            ]
+        ];
     }
 
 }

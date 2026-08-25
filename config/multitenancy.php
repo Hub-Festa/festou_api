@@ -62,9 +62,29 @@ return [
     'tenant_database_connection_name' => env('DB_CONNECTION_TENANTS', 'tenants'),
 
     /*
+     * Migration paths to run for tenant databases.
+     * Paths are relative to the application base path.
+     */
+    'tenant_migration_paths' => [
+        'database/migrations/tenants',
+        'packages/shared/favorites/database/migrations',
+        'packages/shared/settings/database/migrations',
+        'packages/shared/push_handler/database/migrations',
+    ],
+
+    /*
      * The connection name to reach the landlord database.
      */
     'landlord_database_connection_name' => env('DB_CONNECTION_LANDLORD', 'landlord'),
+
+    /*
+     * Migration paths to run for landlord database refresh flows that use explicit paths.
+     * Paths are relative to the application base path.
+     */
+    'landlord_migration_paths' => [
+        'database/migrations/landlord',
+        'packages/shared/settings/database/migrations_landlord',
+    ],
 
     /*
      * This key will be used to associate the current tenant in the context

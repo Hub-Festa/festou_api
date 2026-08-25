@@ -2,28 +2,30 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\LandlordRoles\LandlordRoleService;
 use App\Http\Api\v1\Requests\LandlordRoleDestroyRequest;
 use App\Http\Api\v1\Requests\LandlordRoleStoreRequest;
 use App\Http\Api\v1\Requests\LandlordRoleUpdateRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordUser;
-use App\Models\Landlord\LandlordRole;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 use MongoDB\Driver\Exception\BulkWriteException;
 use Illuminate\Http\Request;
 
 class LandlordRolesController extends Controller
 {
+    public function __construct(
+        private readonly LandlordRoleService $landlordRoleService
+    ) {
+    }
     /**
      * Display a listing of the roles.
      */
     public function index(Request $request): JsonResponse
     {
-        $user = auth()->guard('sanctum')->user();
-
-        $roles = LandlordRole::when($request->has('archived'), fn ($query, $name) => $query->onlyTrashed())
-            ->paginate(15);
+        $roles = $this->landlordRoleService->paginate(
+            $request->boolean('archived'),
+            (int) $request->get('per_page', 15)
+        );
 
         return response()->json($roles);
     }
@@ -35,27 +37,18 @@ class LandlordRolesController extends Controller
     {
 
         try {
-            DB::beginTransaction();
-
-            $role = LandlordRole::create([
-                ...$request->validated(),
-            ]);
-
-            DB::commit();
-
-            return response()->json([
-                'data' => $role
-            ], 201);
-
+            $role = $this->landlordRoleService->create($request->validated());
         } catch (BulkWriteException $e) {
-            DB::rollBack();
-
             if (str_contains($e->getMessage(), 'E11000')) {
                 abort(422, 'Role already exists.');
             }
 
             abort(422, 'Something went wrong when trying to create the role.');
         }
+
+        return response()->json([
+            'data' => $role
+        ], 201);
     }
 
     /**
@@ -64,7 +57,7 @@ class LandlordRolesController extends Controller
     public function show(string $role_id): JsonResponse
     {
 
-        $role = LandlordRole::findOrFail($role_id);
+        $role = $this->landlordRoleService->findById($role_id);
 
         return response()->json([
             'data' => $role
@@ -77,8 +70,8 @@ class LandlordRolesController extends Controller
     public function update(LandlordRoleUpdateRequest $request, string $role_id): JsonResponse
     {
 
-        $role = LandlordRole::findOrFail($role_id);
-        $role->update($request->validated());
+        $role = $this->landlordRoleService->findById($role_id);
+        $role = $this->landlordRoleService->update($role, $request->validated());
 
         return response()->json([
             'data' => $role
@@ -91,17 +84,12 @@ class LandlordRolesController extends Controller
     public function destroy(LandlordRoleDestroyRequest $request): JsonResponse
     {
 
-        $role = LandlordRole::findOrFail($request->route("role_id"));
-
-        DB::beginTransaction();
         try {
-            LandlordUser::where("role_id", $role->id)
-                ->update(['role_id' => $request->validated()['role_id']]);;
-
-            $role->delete();
-            DB::commit();
-        }catch (\Exception $e){
-            DB::rollBack();
+            $this->landlordRoleService->deleteById(
+                $request->route('role_id'),
+                $request->validated()['background_role_id']
+            );
+        } catch (\Throwable) {
             abort(422, "Erro ao excluir role. Tente novamente mais tarde.");
         }
 
@@ -109,17 +97,11 @@ class LandlordRolesController extends Controller
     }
 
     public function forceDestroy($user_id): JsonResponse {
-        $role = LandlordRole::onlyTrashed()->findOrFail($user_id);
-
-        DB::beginTransaction();
-        try{
-            $role->forceDelete();
-        }catch (\Exception $e){
-            DB::rollBack();
+        try {
+            $this->landlordRoleService->forceDeleteById($user_id);
+        } catch (\Throwable) {
             return response()->json(["errors" => ["role" => ["Error deleting relationships."]]]);
         }
-        DB::commit();
-
 
         return response()->json();
     }
@@ -130,11 +112,7 @@ class LandlordRolesController extends Controller
     public function restore(string $role_id): JsonResponse
     {
 
-        $role = LandlordRole::onlyTrashed()
-            ->where('_id', $role_id)
-            ->firstOrFail();
-
-        $role->restore();
+        $this->landlordRoleService->restoreById($role_id);
 
         return response()->json([], 200);
     }
@@ -145,11 +123,7 @@ class LandlordRolesController extends Controller
     public function assignRoleToUser(string $role_id, string $user_id): JsonResponse
     {
 
-        $role = LandlordRole::findOrFail($role_id);
-        $user = LandlordUser::findOrFail($user_id);
-
-        $user->role()->associate($role);
-        $user->save();
+        $this->landlordRoleService->assignRoleToUser($role_id, $user_id);
 
         return response()->json([], 200);
     }
@@ -160,10 +134,7 @@ class LandlordRolesController extends Controller
     public function removeRoleFromUser(string $role_id, string $user_id): JsonResponse
     {
 
-        $role = LandlordRole::findOrFail($role_id);
-        $user = LandlordUser::findOrFail($user_id);
-
-        $user->roles()->detach($role->id);
+        $this->landlordRoleService->removeRoleFromUser($role_id, $user_id);
 
         return response()->json([], 200);
     }

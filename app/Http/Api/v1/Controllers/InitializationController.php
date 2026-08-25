@@ -4,113 +4,61 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Initialization\InitializationPayload;
+use App\Application\Initialization\SystemInitializationService;
 use App\Http\Api\v1\Requests\InitializeRequest;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\LandlordRole;
-use App\Models\Landlord\Tenant;
-use App\Models\Landlord\LandlordUser;
+use App\Support\Branding\BrandingAssetManager;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
 
 class InitializationController extends Controller
 {
-
-    public function isInitialized(): JsonResponse {
-        $users_count = LandlordUser::all()->count();
-        $tenants_count = Tenant::all()->count();
-
-        if($users_count > 0 || $tenants_count > 0){
-            return response()->json(
-                [
-                    "success" => false,
-                    "message" => "Sistema já inicializado",
-                    "errors" => [
-                        "user" => ["Sistema já inicializado"]
-                    ]],
-                403);
-        }
-
-        return response()->json();
+    public function __construct(
+        private readonly SystemInitializationService $initializationService,
+        private readonly BrandingAssetManager $brandingAssetManager
+    ) {
     }
 
-    public function initialize(InitializeRequest $request): JsonResponse {
+    public function isInitialized(): JsonResponse {
 
-        $users_count = LandlordUser::all()->count();
-        $tenants_count = Tenant::all()->count();
-
-        if($users_count > 0 || $tenants_count > 0){
+        if ($this->initializationService->isInitialized()) {
             return response()->json(
                 [
-                    "success" => false,
                     "message" => "Sistema já inicializado",
                     "errors" => [
                         "user" => ["Sistema já inicializado"]
                     ]],
-                403);
+                200);
         }
 
+        return response()->json(status: 403);
+    }
 
-        DB::connection('landlord')->beginTransaction();
-        try{
-            $new_tenant = Tenant::create([
-                "name" => $request->tenant["name"],
-                "subdomain" => $request->tenant["subdomain"]
-            ]);
-
-            $new_tenant->addDomains($request->tenant["domains"]);
-
-            $new_tenant->makeCurrent();
-            $admin_role = LandlordRole::create([
-                ...$request->validated()['role']
-            ]);
-
-            $admin_tenant_template = $new_tenant->roleTemplates()->create(
-                [
-                    "name" => "Admin",
-                    'description' => 'Administrador',
-                    "permissions" => ["*"]
-                ]
-            );
-
-            $new_user = LandlordUser::create([
-                "name" => $request->user['name'],
-                "emails" => $request->user['emails'],
-                "password" => $request->user['password']
-            ]);
-
-            $admin_role->users()->save($new_user);
-
-            $new_user->tenantRoles()->create([
-                ...$admin_tenant_template->attributesToArray(),
-                'tenant_id' => $new_tenant->id,
-            ]);
-
-            foreach($request->user['emails'] as $email){
-                $new_user->emails = [$email];
-            }
-
-            $token = $new_user->createToken("Initialization Token")->plainTextToken;
-
-            $new_tenant->forgetCurrent();
-
-            DB::connection('landlord')->commit();
-
-        }catch (\Exception $e){
-            DB::connection('landlord')->rollBack();
-            throw $e;
+    public function initialize(InitializeRequest $request): JsonResponse
+    {
+        if ($this->initializationService->isInitialized()) {
+            return response()->json(["success" => false, "message" => "System already initialized."], 403);
         }
+
+        $validated = $request->validated();
+        $brandingAssets = $this->brandingAssetManager->createBrandingPayload($request);
+
+        $payload = new InitializationPayload(
+            landlord: $validated['landlord'],
+            tenant: Arr::except($validated['tenant'], ['domains']),
+            role: $validated['role'],
+            user: $validated['user'],
+            themeDataSettings: $validated['branding_data']['theme_data_settings'],
+            logoSettings: $brandingAssets['logo_settings'],
+            pwaIcon: $brandingAssets['pwa_icon'],
+            tenantDomains: $validated['tenant']['domains'] ?? []
+        );
+
+        $result = $this->initializationService->initialize($payload);
 
         return response()->json([
-            "data" => [
-                "user" => $new_user->toArray(),
-                "tenant" => [
-                    ...$new_tenant->attributesToArray(),
-                    "role_admin_id" => $admin_tenant_template->id,
-                ],
-                "role" => $admin_role->toArray(),
-                "token" => $token
-            ]
+            'data' => $result->toResponsePayload(),
         ], 201);
-
     }
 }
