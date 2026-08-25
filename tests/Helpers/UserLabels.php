@@ -10,7 +10,7 @@ class UserLabels extends Labels {
             $this->token = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".token");
+            return $this->getGlobal($this->base_label . ".token") ?? "";
         }
     }
 
@@ -20,7 +20,7 @@ class UserLabels extends Labels {
             $this->password_reset_token = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".password_reset_token");
+            return $this->getGlobal($this->base_label . ".password_reset_token") ?? "";
         }
     }
 
@@ -30,7 +30,7 @@ class UserLabels extends Labels {
             $this->user_id = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".user_id");
+            return $this->getGlobal($this->base_label . ".user_id") ?? "";
         }
     }
 
@@ -40,7 +40,7 @@ class UserLabels extends Labels {
             $this->name = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".name");
+            return $this->getGlobal($this->base_label . ".name") ?? "";
         }
     }
 
@@ -50,7 +50,7 @@ class UserLabels extends Labels {
             $this->email_1 = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".email_1");
+            return $this->getGlobal($this->base_label . ".email_1") ?? "";
         }
     }
 
@@ -60,7 +60,7 @@ class UserLabels extends Labels {
             $this->email_2 = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".email_2");
+            return $this->getGlobal($this->base_label . ".email_2") ?? "";
         }
     }
 
@@ -70,9 +70,20 @@ class UserLabels extends Labels {
             $this->password = $value;
         }
         get {
-            return $this->getGlobal($this->base_label . ".password");
+            return $this->getGlobal($this->base_label . ".password") ?? "";
         }
     }
 
+    public function toArray(): array {
+        return [
+            "token" => $this->token,
+            "password_reset_token" => $this->password_reset_token,
+            "user_id" => $this->user_id,
+            "name" => $this->name,
+            "email_1" => $this->email_1,
+            "email_2" => $this->email_2,
+            "password" => $this->password,
+        ];
+    }
 
 }

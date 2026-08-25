@@ -1,5 +1,52 @@
 <?php
 
+// Keep queue bootstrap aligned with this app's Mongo-first database default so
+// route/bootstrap guardrails can load safely even before a test/runtime env file
+// is materialized.
+$databaseConnection = (string) env('DB_CONNECTION', 'mongodb');
+$isMongoPrimaryConnection = str_starts_with($databaseConnection, 'mongodb')
+    || in_array($databaseConnection, ['landlord', 'tenant'], true);
+
+$queueConnection = env('QUEUE_CONNECTION');
+$queueConnection = is_string($queueConnection) ? trim($queueConnection) : '';
+
+if ($queueConnection === '') {
+    $queueConnection = $isMongoPrimaryConnection ? 'mongodb' : 'database';
+}
+
+$databaseQueueConnection = env('DB_QUEUE_CONNECTION');
+$databaseQueueConnection = is_string($databaseQueueConnection) ? trim($databaseQueueConnection) : '';
+
+$mongodbQueueConnection = env('MONGODB_QUEUE_CONNECTION', 'mongodb');
+$mongodbQueueConnection = is_string($mongodbQueueConnection) ? trim($mongodbQueueConnection) : '';
+if ($mongodbQueueConnection === '') {
+    $mongodbQueueConnection = 'mongodb';
+}
+
+if ($queueConnection === 'database' && $databaseQueueConnection === '') {
+    throw new \RuntimeException(
+        'Queue configuration requires DB_QUEUE_CONNECTION when QUEUE_CONNECTION=database.'
+    );
+}
+
+if (
+    $isMongoPrimaryConnection
+    && $queueConnection === 'database'
+    && in_array($databaseQueueConnection, ['mongodb', 'landlord', 'tenant'], true)
+) {
+    throw new \RuntimeException(
+        'Unsafe queue configuration detected: DB_CONNECTION is MongoDB but QUEUE_CONNECTION=database '.
+        'without a dedicated SQL DB_QUEUE_CONNECTION. Use QUEUE_CONNECTION=mongodb or set DB_QUEUE_CONNECTION '.
+        'to a SQL connection.'
+    );
+}
+
+if ($queueConnection === 'mongodb' && $mongodbQueueConnection === 'tenant') {
+    throw new \RuntimeException(
+        'Unsafe queue configuration detected: MONGODB_QUEUE_CONNECTION must point to shared queue storage, never tenant.'
+    );
+}
+
 return [
 
     /*
@@ -13,7 +60,7 @@ return [
     |
     */
 
-    'default' => env('QUEUE_CONNECTION', 'database'),
+    'default' => $queueConnection,
 
     /*
     |--------------------------------------------------------------------------
@@ -36,10 +83,19 @@ return [
 
         'database' => [
             'driver' => 'database',
-            'connection' => env('DB_QUEUE_CONNECTION'),
+            'connection' => $databaseQueueConnection,
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            'after_commit' => false,
+        ],
+
+        'mongodb' => [
+            'driver' => 'mongodb',
+            'connection' => $mongodbQueueConnection,
+            'collection' => env('MONGODB_QUEUE_COLLECTION', 'jobs'),
+            'queue' => env('MONGODB_QUEUE', 'default'),
+            'retry_after' => (int) env('MONGODB_QUEUE_RETRY_AFTER', 90),
             'after_commit' => false,
         ],
 

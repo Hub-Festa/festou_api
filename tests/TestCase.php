@@ -3,17 +3,83 @@
 namespace Tests;
 
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Tests\Api\Traits\ClearConfigCacheOnce;
+use Tests\Api\Traits\MigrateFreshSeedOnce;
 use Tests\Helpers\Landlord;
 
 abstract class TestCase extends BaseTestCase {
 
-    use MigrateFreshSeedOnce;
+    use MigrateFreshSeedOnce, ClearConfigCacheOnce;
 
     protected string $prefix = "default";
 
+    private string $requestHost;
+
+    protected string $host {
+        get {
+            $host = parse_url(config('app.url'), PHP_URL_HOST);
+            if (is_string($host) && $host !== '') {
+                return $host;
+            }
+
+            return 'nginx';
+        }
+    }
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->clearConfigCacheOnce();
+        $this->migrateOnce();
+        $this->requestHost = $this->host;
+        $_SERVER['HTTP_HOST'] = $this->host;
+        $_SERVER['SERVER_NAME'] = $this->host;
+        $this->withServerVariables(['HTTP_HOST' => $this->host]);
+    }
+
+    public function withServerVariables(array $server)
+    {
+        if (isset($server['HTTP_HOST']) && is_string($server['HTTP_HOST'])) {
+            $this->requestHost = $server['HTTP_HOST'];
+        }
+
+        return parent::withServerVariables($server);
+    }
+
+    protected function normalizeTestUri(string $uri): string
+    {
+        if (str_starts_with($uri, 'http://') || str_starts_with($uri, 'https://')) {
+            return $uri;
+        }
+
+        if ($uri === '') {
+            return "http://{$this->host}/";
+        }
+
+        if ($uri[0] !== '/') {
+            $uri = "/{$uri}";
+        }
+
+        return "http://{$this->requestHost}{$uri}";
+    }
+
+    public function call(
+        $method,
+        $uri,
+        $parameters = [],
+        $cookies = [],
+        $files = [],
+        $server = [],
+        $content = null
+    ) {
+        $uri = $this->normalizeTestUri($uri);
+
+        return parent::call($method, $uri, $parameters, $cookies, $files, $server, $content);
+    }
+
     protected string $api_url_admin {
         get {
-            return "admin/api";
+            return "admin/api/v1";
         }
     }
 
