@@ -6,9 +6,10 @@ namespace Tests\Unit\Application\Identity;
 
 use App\Application\Identity\TenantPasswordRegistrationResult;
 use App\Application\Identity\TenantPasswordRegistrationService;
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Facades\Hash;
@@ -47,7 +48,7 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         );
     }
 
-    public function testRegisterCreatesNewUser(): void
+    public function test_register_creates_new_user(): void
     {
         $result = $this->service->register($this->tenant, [
             'name' => 'Registered Identity',
@@ -59,9 +60,10 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         $this->assertSame('registered', $result->user->identity_state);
         $this->assertTrue(Hash::check('SecurePass!123', (string) $result->user->password));
         $this->assertNotEmpty($result->plainTextToken);
+        $this->assertTokenTenantId($result->plainTextToken);
     }
 
-    public function testRegisterMergesAnonymousIdentities(): void
+    public function test_register_merges_anonymous_identities(): void
     {
         $first = $this->createAnonymousUser();
         $second = $this->createAnonymousUser();
@@ -83,7 +85,7 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         );
     }
 
-    public function testRegisterRejectsInvalidAnonymousId(): void
+    public function test_register_rejects_invalid_anonymous_id(): void
     {
         $this->expectException(ValidationException::class);
 
@@ -95,12 +97,12 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         ]);
     }
 
-    public function testRegisterPropagatesConcurrencyConflict(): void
+    public function test_register_propagates_concurrency_conflict(): void
     {
         $mockMerger = Mockery::mock(AnonymousIdentityMerger::class);
         $mockMerger->shouldReceive('merge')
             ->times(3)
-            ->andThrow(new ConcurrencyConflictException());
+            ->andThrow(new ConcurrencyConflictException);
 
         $service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
@@ -129,6 +131,17 @@ class TenantPasswordRegistrationServiceTest extends TestCase
             'consents' => [],
             'credentials' => [],
         ]);
+    }
+
+    private function assertTokenTenantId(string $plainTextToken): void
+    {
+        $token = PersonalAccessToken::findToken($plainTextToken);
+
+        $this->assertInstanceOf(PersonalAccessToken::class, $token);
+        $this->assertSame(
+            (string) $this->tenant->_id,
+            trim((string) $token->getAttribute('tenant_id'))
+        );
     }
 
     private function initializeSystem(): void

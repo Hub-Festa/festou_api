@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Application\Auth;
 
 use App\Exceptions\Auth\InvalidCredentialsException;
+use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
 use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Laravel\Sanctum\NewAccessToken;
+use RuntimeException;
 
 class AccountAuthenticationService
 {
@@ -18,7 +21,7 @@ class AccountAuthenticationService
         $user = $this->findUserByEmail($email);
 
         if (! $user || ! Hash::check($password, (string) $user->password)) {
-            throw new InvalidCredentialsException();
+            throw new InvalidCredentialsException;
         }
 
         $account = Account::current();
@@ -32,13 +35,15 @@ class AccountAuthenticationService
         }
 
         $abilities = $account ? $user->getPermissions($account) : [];
+        $tenantId = $this->currentTenantId();
 
         $token = $user->createToken(
             $deviceName,
             $this->sanitizeAbilities($user, $abilities)
-        )->plainTextToken;
+        );
+        $this->stampTenantId($token, $tenantId);
 
-        return new AuthenticationResult($user, $token);
+        return new AuthenticationResult($user, $token->plainTextToken);
     }
 
     public function logout(AccountUser $user, bool $allDevices, ?string $deviceName = null): void
@@ -61,8 +66,24 @@ class AccountAuthenticationService
             ->first();
     }
 
+    private function currentTenantId(): string
+    {
+        $tenantId = trim((string) (Tenant::current()?->getAttribute('_id') ?? ''));
+        if ($tenantId === '') {
+            throw new RuntimeException('Cannot issue tenant account token without current tenant context.');
+        }
+
+        return $tenantId;
+    }
+
+    private function stampTenantId(NewAccessToken $newToken, string $tenantId): void
+    {
+        $newToken->accessToken->setAttribute('tenant_id', $tenantId);
+        $newToken->accessToken->save();
+    }
+
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(AccountUser $user, array $abilities): array
