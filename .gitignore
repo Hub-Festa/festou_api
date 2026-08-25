@@ -6,6 +6,8 @@ storage/
 /public/build
 /public/hot
 /public/storage
+/public/.well-known/assetlinks.json
+/public/.well-known/apple-app-site-association
 /storage/*.key
 /storage/pail
 /vendor
@@ -23,9 +25,29 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+/.composer/
 
 # AI Local helper
 AGENTS.md
+CLAUDE.md
 delphi-ai
 foundation_documentation
 .agent
+.agent/
+.agents
+.agents/
+.codex
+.codex/
+.claude
+.claude/
+
+# CLINE
+CLINE.md
+.cline
+.cline/
+.clinerules
+.clinerules/
+
+# Local-only helper scripts/symlinks
+/scripts/delphi
+/scripts/delphi/

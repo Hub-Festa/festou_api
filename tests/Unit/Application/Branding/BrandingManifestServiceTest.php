@@ -42,6 +42,7 @@ class BrandingManifestServiceTest extends TestCase
         $manifest = $this->service->buildManifest('tenant.example.test');
 
         $this->assertSame('Tenant Alpha', $manifest['name']);
+        $this->assertSame('', $manifest['description']);
         $this->assertCount(3, $manifest['icons']);
     }
 
@@ -54,13 +55,15 @@ class BrandingManifestServiceTest extends TestCase
         $this->assertNotNull($value);
     }
 
-    public function testAssetResponseReturnsNotFoundWhenMissing(): void
+    public function testAssetResponseGeneratesNeutralPngWhenBrandingMediaIsMissing(): void
     {
         Storage::fake('public');
 
         $response = $this->service->assetResponse(null);
 
-        $this->assertSame(404, $response->getStatusCode());
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('image/png', $response->headers->get('content-type'));
+        $this->assertNotEmpty($response->getContent());
     }
 
     private function initializeSystem(): void

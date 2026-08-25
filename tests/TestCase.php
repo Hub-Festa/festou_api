@@ -13,6 +13,8 @@ abstract class TestCase extends BaseTestCase {
 
     protected string $prefix = "default";
 
+    private string $requestHost;
+
     protected string $host {
         get {
             $host = parse_url(config('app.url'), PHP_URL_HOST);
@@ -29,9 +31,19 @@ abstract class TestCase extends BaseTestCase {
         parent::setUp();
         $this->clearConfigCacheOnce();
         $this->migrateOnce();
+        $this->requestHost = $this->host;
         $_SERVER['HTTP_HOST'] = $this->host;
         $_SERVER['SERVER_NAME'] = $this->host;
         $this->withServerVariables(['HTTP_HOST' => $this->host]);
+    }
+
+    public function withServerVariables(array $server)
+    {
+        if (isset($server['HTTP_HOST']) && is_string($server['HTTP_HOST'])) {
+            $this->requestHost = $server['HTTP_HOST'];
+        }
+
+        return parent::withServerVariables($server);
     }
 
     protected function normalizeTestUri(string $uri): string
@@ -48,7 +60,7 @@ abstract class TestCase extends BaseTestCase {
             $uri = "/{$uri}";
         }
 
-        return "http://{$this->host}{$uri}";
+        return "http://{$this->requestHost}{$uri}";
     }
 
     public function call(

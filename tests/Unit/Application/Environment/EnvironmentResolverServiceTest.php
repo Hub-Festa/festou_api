@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\Environment;
 
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Environment\EnvironmentResolverService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -36,14 +39,51 @@ class EnvironmentResolverServiceTest extends TestCase
 
     public function testResolveReturnsTenantEnvironmentWhenAvailable(): void
     {
-        $tenant = Tenant::query()->firstOrFail();
-        $tenant->makeCurrent();
+        Storage::fake('public');
 
-        $result = $this->service->resolve(['app_domain' => 'tenant-beta.test', 'request_root' => 'https://example.test']);
+        $tenant = Tenant::query()->firstOrFail();
+        $tenant->domains()->withTrashed()->get()->each->forceDelete();
+        $tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+            'path' => 'com.tenant.beta',
+        ]);
+        $tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_WEB,
+            'path' => 'tenant-beta.test',
+        ]);
+        $tenant->makeCurrent();
+        $mediaService = $this->app->make(BrandingPublicWebMediaService::class);
+        $canonical = $mediaService->storeDefaultImage(
+            'https://tenant-beta.test',
+            $tenant,
+            UploadedFile::fake()->image('default-image.png')
+        );
+        $version = (string) parse_url($canonical, PHP_URL_QUERY);
+        parse_str($version, $parameters);
+        $resolvedVersion = (string) ($parameters['v'] ?? '');
+        $tenant->branding_data = [
+            'public_web_metadata' => [
+                'default_image' => sprintf(
+                    'https://tenant-beta.test/storage/tenants/%s/public-web/default-image.png?v=%s',
+                    $tenant->slug,
+                    $resolvedVersion
+                ),
+            ],
+        ];
+        $tenant->save();
+
+        $result = $this->service->resolve([
+            'app_domain' => 'com.tenant.beta',
+            'request_root' => 'https://tenant-beta.test',
+            'request_host' => 'tenant-beta.test',
+        ]);
 
         $this->assertSame('tenant', $result['type']);
         $this->assertSame($tenant->name, $result['name']);
-        $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
+        $this->assertSame('https://tenant-beta.test', $result['main_domain']);
+        $this->assertSame(['com.tenant.beta'], $result['app_domains']);
+        $this->assertSame(parse_url($canonical, PHP_URL_PATH), parse_url($result['public_web_metadata']['default_image'], PHP_URL_PATH));
+        $this->assertSame(parse_url($canonical, PHP_URL_QUERY), parse_url($result['public_web_metadata']['default_image'], PHP_URL_QUERY));
     }
 
     public function testResolveFallsBackToLandlordEnvironment(): void
@@ -54,7 +94,6 @@ class EnvironmentResolverServiceTest extends TestCase
 
         $this->assertSame('landlord', $result['type']);
         $this->assertSame('https://landlord.test', $result['main_domain']);
-        $this->assertSame(5, $result['telemetry']['location_freshness_minutes'] ?? null);
     }
 
     private function initializeSystem(): void

@@ -39,9 +39,10 @@ return Application::configure(basePath: dirname(__DIR__))
                 $mainHost = (string) config('app.url');
             }
             $mainHost = trim($mainHost);
+            $escapedMainHost = preg_quote($mainHost, '/');
             $tenantDomainPattern = $mainHost === ''
                 ? '.+'
-                : '^(?!' . preg_quote($mainHost, '/') . '$).+';
+                : '^(?!' . $escapedMainHost . '$)(?!(?:[^.]+\.){2,}' . $escapedMainHost . '$).+';
 
             Route::domain($mainHost)->group(function () use ($registerProjectRoutes): void {
                 Route::prefix('admin/api/v1')
@@ -50,7 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
                 $registerProjectRoutes(
                     'api/v1',
-                    [],
+                    'tenant-maybe',
                     base_path('routes/api/project_landlord_public_api_v1.php'),
                     'project_landlord_public_api_v1'
                 );
@@ -75,7 +76,7 @@ return Application::configure(basePath: dirname(__DIR__))
                         ->group(base_path('routes/api/initialize.php'));
 
                     Route::prefix('admin/api/v1')
-                        ->middleware(['tenant', 'landlord'])
+                        ->middleware('tenant')
                         ->group(base_path('routes/api/tenant_api_v1.php'));
 
                     Route::prefix('api/v1')
@@ -102,7 +103,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
                     $registerProjectRoutes(
                         'admin/api/v1',
-                        ['tenant', 'landlord'],
+                        'tenant',
                         base_path('routes/api/project_tenant_admin_api_v1.php'),
                         'project_tenant_admin_api_v1'
                     );

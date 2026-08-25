@@ -32,6 +32,16 @@ class Tenant extends BaseTenant
 {
     use UsesLandlordConnection, HasSlug, DocumentModel, SoftDeletes, HasOwner, OwnRoles;
 
+    public const DOMAIN_TYPE_WEB = 'web';
+
+    public const DOMAIN_TYPE_APP_ANDROID = 'app_android';
+
+    public const DOMAIN_TYPE_APP_IOS = 'app_ios';
+
+    public const APP_PLATFORM_ANDROID = 'android';
+
+    public const APP_PLATFORM_IOS = 'ios';
+
     protected $fillable = [
         'name',
         'slug',
@@ -40,8 +50,6 @@ class Tenant extends BaseTenant
         'subdomain',
         'app_domains',
         'domains',
-        'settings',
-        'organization_id',
     ];
 
     public function roleTemplates(): HasMany {
@@ -65,6 +73,72 @@ class Tenant extends BaseTenant
     public function domains(): HasMany
     {
         return $this->hasMany(Domains::class);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function resolvedAppDomains(): array
+    {
+        $typed = array_values(array_filter($this->typedAppDomainIdentifiers()));
+
+        if ($typed !== []) {
+            return array_values(array_unique($typed));
+        }
+
+        return $this->legacyAppDomains();
+    }
+
+    /**
+     * @return array{android: ?string, ios: ?string}
+     */
+    public function typedAppDomainIdentifiers(): array
+    {
+        $domains = $this->domains()
+            ->whereIn('type', [
+                self::DOMAIN_TYPE_APP_ANDROID,
+                self::DOMAIN_TYPE_APP_IOS,
+            ])
+            ->orderBy('created_at')
+            ->get()
+            ->all();
+
+        $resolved = [
+            self::APP_PLATFORM_ANDROID => null,
+            self::APP_PLATFORM_IOS => null,
+        ];
+
+        foreach ($domains as $domain) {
+            if (! $domain instanceof Domains) {
+                continue;
+            }
+
+            $path = $this->normalizeDomainPath($domain->path);
+            if ($path === null) {
+                continue;
+            }
+
+            if ($domain->type === self::DOMAIN_TYPE_APP_ANDROID && $resolved[self::APP_PLATFORM_ANDROID] === null) {
+                $resolved[self::APP_PLATFORM_ANDROID] = $path;
+            }
+
+            if ($domain->type === self::DOMAIN_TYPE_APP_IOS && $resolved[self::APP_PLATFORM_IOS] === null) {
+                $resolved[self::APP_PLATFORM_IOS] = $path;
+            }
+        }
+
+        return $resolved;
+    }
+
+    public function appDomainIdentifierForPlatform(string $platform): ?string
+    {
+        $normalizedPlatform = Str::lower(trim($platform));
+
+        if (! in_array($normalizedPlatform, [self::APP_PLATFORM_ANDROID, self::APP_PLATFORM_IOS], true)) {
+            return null;
+        }
+
+        return $this->typedAppDomainIdentifiers()[$normalizedPlatform];
     }
 
     public static function resolve(): static
@@ -118,7 +192,7 @@ class Tenant extends BaseTenant
         return [
             'name'             => $this->name,
             'short_name'       => $this->short_name ?? $this->name,
-            'description'      => $this->description,
+            'description'      => (string) ($this->description ?? ''),
             'start_url'        => '/',
             'display'          => 'standalone',
             'background_color' => $main_color,
@@ -179,6 +253,7 @@ class Tenant extends BaseTenant
     private function primaryDomainFromRelation(): ?string
     {
         $mainDomain = $this->domains()
+            ->where('type', self::DOMAIN_TYPE_WEB)
             ->where('main', true)
             ->orderBy('created_at')
             ->first();
@@ -188,6 +263,7 @@ class Tenant extends BaseTenant
         }
 
         $firstDomain = $this->domains()
+            ->where('type', self::DOMAIN_TYPE_WEB)
             ->orderBy('created_at')
             ->first();
 
@@ -240,6 +316,36 @@ class Tenant extends BaseTenant
 
             return $domain;
         }, $domains);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function legacyAppDomains(): array
+    {
+        $domains = $this->getAttribute('app_domains') ?? [];
+
+        if (! is_array($domains) || $domains === []) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(
+            static fn (mixed $domain): ?string => is_string($domain) && trim($domain) !== ''
+                ? Str::lower(trim($domain))
+                : null,
+            $domains
+        )));
+    }
+
+    private function normalizeDomainPath(?string $path): ?string
+    {
+        if (! is_string($path)) {
+            return null;
+        }
+
+        $normalized = Str::lower(trim($path));
+
+        return $normalized === '' ? null : $normalized;
     }
 
     protected $casts = [];

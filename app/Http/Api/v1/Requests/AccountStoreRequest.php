@@ -29,7 +29,6 @@ class AccountStoreRequest extends FormRequest
             'document' => 'required|array',
             'document.type' => 'required|string|in:cpf,cnpj',
             'document.number' => 'required|string|max:' . InputConstraints::NAME_MAX,
-            'organization_id' => 'sometimes|string|size:' . InputConstraints::OBJECT_ID_LENGTH,
         ];
     }
 

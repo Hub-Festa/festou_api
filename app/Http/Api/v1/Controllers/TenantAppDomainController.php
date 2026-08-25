@@ -2,7 +2,6 @@
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantAppDomainManagementService;
 use App\Http\Api\v1\Requests\TenantAppDomainRequest;
 use App\Http\Controllers\Controller;
@@ -12,8 +11,7 @@ use Illuminate\Http\JsonResponse;
 class TenantAppDomainController extends Controller
 {
     public function __construct(
-        private readonly TenantAppDomainManagementService $appDomainService,
-        private readonly TelemetryEmitter $telemetry
+        private readonly TenantAppDomainManagementService $appDomainService
     ) {
     }
 
@@ -29,23 +27,14 @@ class TenantAppDomainController extends Controller
     public function store(TenantAppDomainRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $appDomain = $request->validated()['app_domain'];
-        $domains = $this->appDomainService->add($tenant, $appDomain);
-
-        $user = $request->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'app_domain_added',
-                userId: (string) $user->_id,
-                properties: [
-                    'domain' => $appDomain,
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
+        $domains = $this->appDomainService->upsert(
+            tenant: $tenant,
+            platform: $request->platform(),
+            identifier: $request->identifier(),
+        );
 
         return response()->json([
-            'message' => 'App domains added successfully.',
+            'message' => 'App domain identifier saved successfully.',
             'app_domains' => $domains,
         ]);
     }
@@ -53,23 +42,13 @@ class TenantAppDomainController extends Controller
     public function destroy(TenantAppDomainRequest $request): JsonResponse
     {
         $tenant = Tenant::resolve();
-        $appDomain = $request->validated()['app_domain'];
-        $domains = $this->appDomainService->remove($tenant, $appDomain);
-
-        $user = $request->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'app_domain_removed',
-                userId: (string) $user->_id,
-                properties: [
-                    'domain' => $appDomain,
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
+        $domains = $this->appDomainService->remove(
+            tenant: $tenant,
+            platform: $request->platform(),
+        );
 
         return response()->json([
-            'message' => 'App domains deleted successfully.',
+            'message' => 'App domain identifier removed successfully.',
             'app_domains' => $domains,
         ]);
     }

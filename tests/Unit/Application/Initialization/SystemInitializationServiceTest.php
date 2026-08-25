@@ -6,8 +6,6 @@ namespace Tests\Unit\Application\Initialization;
 
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Models\Landlord\Landlord;
-use App\Models\Landlord\Tenant;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -44,8 +42,8 @@ class SystemInitializationServiceTest extends TestCase
 
         $result = $service->initialize($payload);
 
-        $this->assertSame(1, Landlord::query()->count());
-        $this->assertSame(1, Tenant::query()->count());
+        $this->assertDatabaseCount('landlords', 1, 'landlord');
+        $this->assertDatabaseCount('tenants', 1, 'landlord');
         $this->assertNotEmpty($result->token);
         $this->assertSame('Root User', $result->user->name);
         $this->assertTrue($service->isInitialized());

@@ -22,6 +22,8 @@ final class InputConstraints
     public const PHONE_ARRAY_MAX = 5;
 
     public const METADATA_MAX_ITEMS = 20;
+    public const TAXONOMY_BATCH_MAX_ITEMS = 100;
+    public const ADMIN_TAXONOMY_BATCH_TERMS_PER_GROUP_MAX = 200;
     public const METADATA_MAX_KB = 8;
 
     public const OBJECT_ID_LENGTH = 24;

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Accounts\AccountRoleTemplateService;
 use App\Http\Api\v1\Requests\AccountRoleTemplatesStoreRequest;
 use App\Http\Api\v1\Requests\AccountRolesDeleteRequest;
@@ -19,8 +18,7 @@ use MongoDB\BSON\ObjectId;
 class AccountRolesTemplatesController extends Controller
 {
     public function __construct(
-        private readonly AccountRoleTemplateService $roleTemplateService,
-        private readonly TelemetryEmitter $telemetry
+        private readonly AccountRoleTemplateService $roleTemplateService
     ) {
     }
 
@@ -41,19 +39,6 @@ class AccountRolesTemplatesController extends Controller
         }
 
         $role = $this->roleTemplateService->create($account, $request->validated());
-
-        $actor = $request->user();
-        if ($actor) {
-            $this->telemetry->emit(
-                event: 'account_role_created',
-                userId: (string) $actor->_id,
-                properties: [
-                    'account_id' => (string) $account->_id,
-                    'role_id' => (string) $role->_id,
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
 
         return response()->json([
             'data' => $role,
@@ -93,22 +78,7 @@ class AccountRolesTemplatesController extends Controller
             ], 422);
         }
 
-        $validated = $request->validated();
-        $updated = $this->roleTemplateService->update($role, $validated);
-
-        $actor = $request->user();
-        if ($actor) {
-            $this->telemetry->emit(
-                event: 'account_role_updated',
-                userId: (string) $actor->_id,
-                properties: [
-                    'account_id' => (string) $account->_id,
-                    'role_id' => (string) $role->_id,
-                    'changed_fields' => array_keys($validated),
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
+        $updated = $this->roleTemplateService->update($role, $request->validated());
 
         return response()->json([
             'data' => $updated,
@@ -151,19 +121,6 @@ class AccountRolesTemplatesController extends Controller
             ], 422);
         }
 
-        $actor = $request->user();
-        if ($actor) {
-            $this->telemetry->emit(
-                event: 'account_role_deleted',
-                userId: (string) $actor->_id,
-                properties: [
-                    'account_id' => (string) $account->_id,
-                    'role_id' => (string) $roleToDelete->_id,
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
-
         return response()->json();
     }
 
@@ -175,19 +132,6 @@ class AccountRolesTemplatesController extends Controller
             (string) $request->route('role_id')
         );
 
-        $actor = request()->user();
-        if ($actor) {
-            $this->telemetry->emit(
-                event: 'account_role_restored',
-                userId: (string) $actor->_id,
-                properties: [
-                    'account_id' => (string) $account->_id,
-                    'role_id' => (string) $role->_id,
-                ],
-                idempotencyKey: request()->header('X-Request-Id')
-            );
-        }
-
         return response()->json([
             'data' => $role,
         ]);
@@ -196,24 +140,10 @@ class AccountRolesTemplatesController extends Controller
     public function forceDestroy(Request $request): JsonResponse
     {
         $account = Account::current();
-        $roleId = (string) $request->route('role_id');
         $this->roleTemplateService->forceDelete(
             $account,
-            $roleId
+            (string) $request->route('role_id')
         );
-
-        $actor = request()->user();
-        if ($actor) {
-            $this->telemetry->emit(
-                event: 'account_role_force_deleted',
-                userId: (string) $actor->_id,
-                properties: [
-                    'account_id' => (string) $account->_id,
-                    'role_id' => $roleId,
-                ],
-                idempotencyKey: request()->header('X-Request-Id')
-            );
-        }
 
         return response()->json([], 200);
     }

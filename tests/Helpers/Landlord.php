@@ -80,7 +80,7 @@ class Landlord extends Labels {
         get {
             return new TenantLabels(
                 $this->base_label.".tenant.primary",
-                "Belluga Solutions Test"
+                "Platform Tenant Test"
             );
         }
     }

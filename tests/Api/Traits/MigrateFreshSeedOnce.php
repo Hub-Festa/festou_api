@@ -17,7 +17,7 @@ trait MigrateFreshSeedOnce
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
 
-        // Avoid migrate:fresh on Mongo; dropDatabase can race with subsequent migrations.
+        // Mongo database drops are asynchronous; keep migrations deterministic with collection cleanup.
         if ($dsn !== '' && str_contains($dsn, 'mongodb')) {
             return 'migrate';
         }
@@ -31,12 +31,10 @@ trait MigrateFreshSeedOnce
 
             $command = $this->migrationCommand();
             $tenantPaths = $this->tenantMigrationPathArgs();
+            $landlordPaths = $this->landlordMigrationPathArgs();
 
             if ($command === 'migrate') {
                 $this->wipeMongoCollections();
-            }
-            if ($command === 'migrate:fresh') {
-                $this->dropTenantDatabases();
             }
 
             Artisan::call(sprintf(
@@ -45,8 +43,9 @@ trait MigrateFreshSeedOnce
                 $tenantPaths
             ));
             Artisan::call(sprintf(
-                '%s --database=landlord --path=database/migrations/landlord',
-                $command
+                '%s --database=landlord %s',
+                $command,
+                $landlordPaths
             ));
 
             static::$migrationHasRunOnce = true;
@@ -56,6 +55,16 @@ trait MigrateFreshSeedOnce
     protected function tenantMigrationPathArgs(): string
     {
         $paths = (array) config('multitenancy.tenant_migration_paths', ['database/migrations/tenants']);
+
+        return implode(' ', array_map(
+            static fn (string $path): string => sprintf('--path=%s', $path),
+            $paths
+        ));
+    }
+
+    protected function landlordMigrationPathArgs(): string
+    {
+        $paths = (array) config('multitenancy.landlord_migration_paths', ['database/migrations/landlord']);
 
         return implode(' ', array_map(
             static fn (string $path): string => sprintf('--path=%s', $path),
@@ -76,11 +85,11 @@ trait MigrateFreshSeedOnce
         $tenantDatabase = DB::connection('tenant')->getDatabase();
 
         foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
-            $landlordDatabase->dropCollection($collectionName);
+            $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
         }
 
         foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
-            $tenantDatabase->dropCollection($collectionName);
+            $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
         }
 
         if (empty($tenantDatabaseNames)) {
@@ -93,21 +102,7 @@ trait MigrateFreshSeedOnce
             $database = $tenantClient->selectDatabase($databaseName);
 
             foreach ($database->listCollectionNames() as $collectionName) {
-                $database->dropCollection($collectionName);
-            }
-        }
-    }
-
-    protected function dropTenantDatabases(): void
-    {
-        $tenantClient = DB::connection('tenant')->getMongoClient();
-        $defaultTenantDb = (string) config('database.connections.tenant.database');
-
-        foreach ($tenantClient->listDatabases() as $databaseInfo) {
-            $databaseName = $databaseInfo->getName();
-
-            if (str_starts_with($databaseName, 'tenant_') || $databaseName === $defaultTenantDb) {
-                $tenantClient->selectDatabase($databaseName)->drop();
+                $database->selectCollection($collectionName)->deleteMany([]);
             }
         }
     }

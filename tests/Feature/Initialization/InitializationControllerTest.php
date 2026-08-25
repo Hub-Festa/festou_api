@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Initialization;
 
-use App\Models\Landlord\Landlord;
-use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
@@ -37,8 +35,8 @@ class InitializationControllerTest extends TestCase
         $response->assertStatus(201);
         $response->assertJsonPath('data.user.name', 'Admin Test');
 
-        $this->assertSame(1, Landlord::query()->count());
-        $this->assertSame(1, Tenant::query()->count());
+        $this->assertDatabaseCount('landlords', 1, 'landlord');
+        $this->assertDatabaseCount('tenants', 1, 'landlord');
     }
 
     public function testSubsequentInitializationIsRejected(): void
@@ -58,7 +56,7 @@ class InitializationControllerTest extends TestCase
     {
         return [
             'landlord' => [
-                'name' => 'Belluga HQ',
+                'name' => 'Platform HQ',
             ],
             'user' => [
                 'name' => 'Admin Test',
@@ -66,10 +64,10 @@ class InitializationControllerTest extends TestCase
                 'password' => 'secret123',
             ],
             'tenant' => [
-                'name' => 'Belluga Solutions Test',
-                'subdomain' => 'belluga-test',
+                'name' => 'Platform Tenant Test',
+                'subdomain' => 'platform-test',
                 'domains' => [
-                    'tenant.belluga.test',
+                    'tenant.platform.test',
                 ],
             ],
             'role' => [

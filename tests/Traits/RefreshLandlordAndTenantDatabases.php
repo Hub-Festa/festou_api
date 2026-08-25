@@ -2,12 +2,9 @@
 
 namespace Tests\Traits;
 
-use App\Models\Landlord\Landlord;
-use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\Tenant;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 trait RefreshLandlordAndTenantDatabases
 {
@@ -18,8 +15,8 @@ trait RefreshLandlordAndTenantDatabases
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
 
-        // Atlas drops can hang or fail; prefer non-destructive migrate in that case.
-        if ($dsn !== '' && str_contains($dsn, 'mongodb+srv://')) {
+        // Mongo database drops are asynchronous; keep migrations deterministic with collection cleanup.
+        if ($dsn !== '' && str_contains($dsn, 'mongodb')) {
             return 'migrate';
         }
 
@@ -37,66 +34,42 @@ trait RefreshLandlordAndTenantDatabases
 
         $landlordDatabase = DB::connection('landlord')->getDatabase();
         $tenantDatabase = DB::connection('tenant')->getDatabase();
-        $landlordDsn = (string) env('DB_URI_LANDLORD', '');
-        $tenantDsn = (string) env('DB_URI_TENANTS', '');
-        $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
-        $isAtlas = $dsn !== '' && str_contains($dsn, 'mongodb+srv://');
 
-        Log::info('Tests: landlord collections before wipe', [
-            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
-            'landlords_count' => Landlord::query()->count(),
-            'tenants_count' => Tenant::query()->count(),
-        ]);
-        Log::info('Tests: tenant collections before wipe', [
-            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
-        ]);
-        if ($isAtlas) {
-            foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
-                $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
-            }
+        $landlordCollections = iterator_to_array($landlordDatabase->listCollectionNames());
+        $tenantCollections = iterator_to_array($tenantDatabase->listCollectionNames());
 
-            foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
-                $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
-            }
-
-            LandlordUser::query()->forceDelete();
-            Landlord::query()->delete();
-            Tenant::query()->forceDelete();
-
-            if (! empty($tenantDatabaseNames)) {
-                $tenantClient = DB::connection('tenant')->getMongoClient();
-
-                foreach ($tenantDatabaseNames as $databaseName) {
-                    $database = $tenantClient->selectDatabase($databaseName);
-
-                    foreach ($database->listCollectionNames() as $collectionName) {
-                        $database->selectCollection($collectionName)->deleteMany([]);
-                    }
-                }
-            }
-        } else {
-            $landlordDatabase->drop();
-            $tenantDatabase->drop();
-
-            if (! empty($tenantDatabaseNames)) {
-                $tenantClient = DB::connection('tenant')->getMongoClient();
-
-                foreach ($tenantDatabaseNames as $databaseName) {
-                    $tenantClient->selectDatabase($databaseName)->drop();
-                }
-            }
-
-            static::$migrationsRan = false;
+        if (
+            static::$migrationsRan
+            && empty($landlordCollections)
+            && empty($tenantCollections)
+            && empty($tenantDatabaseNames)
+        ) {
+            return;
         }
 
-        Log::info('Tests: landlord collections after wipe', [
-            'collections' => iterator_to_array($landlordDatabase->listCollectionNames()),
-            'landlords_count' => Landlord::query()->count(),
-            'tenants_count' => Tenant::query()->count(),
-        ]);
-        Log::info('Tests: tenant collections after wipe', [
-            'collections' => iterator_to_array($tenantDatabase->listCollectionNames()),
-        ]);
+        if (! empty($landlordCollections)) {
+            foreach ($landlordCollections as $collectionName) {
+                $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
+            }
+        }
+
+        if (! empty($tenantCollections)) {
+            foreach ($tenantCollections as $collectionName) {
+                $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
+            }
+        }
+
+        if (! empty($tenantDatabaseNames)) {
+            $tenantClient = DB::connection('tenant')->getMongoClient();
+
+            foreach ($tenantDatabaseNames as $databaseName) {
+                $database = $tenantClient->selectDatabase($databaseName);
+
+                foreach ($database->listCollectionNames() as $collectionName) {
+                    $database->selectCollection($collectionName)->deleteMany([]);
+                }
+            }
+        }
 
         if (static::$migrationsRan) {
             return;
@@ -104,11 +77,13 @@ trait RefreshLandlordAndTenantDatabases
 
         $command = $this->migrationCommand();
         $tenantPaths = $this->tenantMigrationPathArgs();
+        $landlordPaths = $this->landlordMigrationPathArgs();
 
-        Artisan::call($command, [
-            '--database' => 'landlord',
-            '--path' => 'database/migrations/landlord',
-        ]);
+        Artisan::call(sprintf(
+            '%s --database=landlord %s',
+            $command,
+            $landlordPaths
+        ));
 
         Artisan::call(sprintf(
             'tenants:artisan "%s --database=tenant %s"',
@@ -116,16 +91,22 @@ trait RefreshLandlordAndTenantDatabases
             $tenantPaths
         ));
 
-        LandlordUser::query()->forceDelete();
-        Landlord::query()->delete();
-        Tenant::query()->forceDelete();
-
         static::$migrationsRan = true;
     }
 
     protected function tenantMigrationPathArgs(): string
     {
         $paths = (array) config('multitenancy.tenant_migration_paths', ['database/migrations/tenants']);
+
+        return implode(' ', array_map(
+            static fn (string $path): string => sprintf('--path=%s', $path),
+            $paths
+        ));
+    }
+
+    protected function landlordMigrationPathArgs(): string
+    {
+        $paths = (array) config('multitenancy.landlord_migration_paths', ['database/migrations/landlord']);
 
         return implode(' ', array_map(
             static fn (string $path): string => sprintf('--path=%s', $path),

@@ -2,7 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
+use App\Application\Branding\BrandingPublicWebMediaService;
 use App\Application\Tenants\TenantBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
 use App\Models\Landlord\Tenant;
@@ -15,7 +15,7 @@ class TenantBrandingController
 
     public function __construct(
         private readonly TenantBrandingManagementService $brandingService,
-        private readonly TelemetryEmitter $telemetry
+        private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
     ) {
     }
 
@@ -24,6 +24,14 @@ class TenantBrandingController
         $tenant = Tenant::resolve();
         $validated = $request->validated();
         $uploadedLogos = $this->processLogoUploads($request);
+
+        if ($request->hasFile('public_web_metadata.default_image')) {
+            $validated['public_web_metadata']['default_image'] = $this->brandingPublicWebMediaService->storeDefaultImage(
+                $request->getSchemeAndHttpHost(),
+                $tenant,
+                $request->file('public_web_metadata.default_image')
+            );
+        }
 
         $pwaVariants = [];
         if ($request->hasFile('logo_settings.pwa_icon')) {
@@ -38,18 +46,14 @@ class TenantBrandingController
             $uploadedLogos,
             $pwaVariants
         );
-
-        $user = $request->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'tenant_branding_updated',
-                userId: (string) $user->_id,
-                properties: [
-                    'changed_fields' => array_keys($validated),
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
+        if ($request->hasFile('public_web_metadata.default_image')) {
+            $brandingData['public_web_metadata']['default_image'] = (string) $validated['public_web_metadata']['default_image'];
         }
+        $brandingData = $this->brandingPublicWebMediaService->materializeBrandingData(
+            $request->getSchemeAndHttpHost(),
+            $tenant,
+            $brandingData
+        );
 
         return response()->json([
             'message' => 'Branding data updated successfully.',

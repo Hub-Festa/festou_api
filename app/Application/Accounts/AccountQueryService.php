@@ -37,7 +37,6 @@ class AccountQueryService extends AbstractQueryService
                     'name' => $account->name,
                     'slug' => $account->slug,
                     'document' => $account->document,
-                    'organization_id' => $account->organization_id ?? null,
                     'created_at' => $account->created_at?->toJSON(),
                     'updated_at' => $account->updated_at?->toJSON(),
                     'deleted_at' => $account->deleted_at?->toJSON(),
@@ -63,10 +62,5 @@ class AccountQueryService extends AbstractQueryService
     protected function dateFields(): array
     {
         return ['created_at', 'updated_at', 'deleted_at'];
-    }
-
-    protected function extraSearchableFields(): array
-    {
-        return ['organization_id'];
     }
 }

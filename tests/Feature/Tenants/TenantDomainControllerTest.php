@@ -7,23 +7,16 @@ namespace Tests\Feature\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Landlord\Tenant;
-use Tests\TestCaseTenant;
+use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
-use Tests\Helpers\TenantLabels;
 
-class TenantDomainControllerTest extends TestCaseTenant
+class TenantDomainControllerTest extends TestCase
 {
     use RefreshLandlordAndTenantDatabases;
 
-    protected TenantLabels $tenant {
-        get {
-            return $this->landlord->tenant_primary;
-        }
-    }
-
     private static bool $bootstrapped = false;
 
-    private Tenant $tenantModel;
+    private Tenant $tenant;
 
     private array $headers;
 
@@ -39,21 +32,22 @@ class TenantDomainControllerTest extends TestCaseTenant
             self::$bootstrapped = true;
         }
 
-        $this->tenantModel = Tenant::query()->firstOrFail();
-        $this->tenantModel->update([
+        $this->tenant = Tenant::query()->firstOrFail();
+        $this->tenant->update([
             'app_domains' => ['tenantkappa.app'],
         ]);
-        $this->tenantModel->domains()->updateOrCreate(
+        $this->tenant->domains()->updateOrCreate(
             ['path' => 'tenantkappa.test'],
             ['type' => 'web']
         );
-        $this->tenantModel = $this->tenantModel->fresh();
-        $this->tenantModel->makeCurrent();
-        $this->baseUrl = "{$this->base_tenant_api_admin}domains";
+        $this->tenant = $this->tenant->fresh();
+        $this->tenant->makeCurrent();
+        $tenantHost = "{$this->tenant->subdomain}.{$this->host}";
+        $this->baseUrl = "http://{$tenantHost}/admin/api/v1/domains";
 
-        $this->headers = array_merge($this->getHeaders(), [
+        $this->headers = [
             'X-App-Domain' => 'tenantkappa.app',
-        ]);
+        ];
     }
 
     public function testStoreCreatesDomain(): void
@@ -75,7 +69,7 @@ class TenantDomainControllerTest extends TestCaseTenant
 
     public function testDestroySoftDeletesDomain(): void
     {
-        $domain = $this->tenantModel->domains()->create([
+        $domain = $this->tenant->domains()->create([
             'path' => 'removekappa.com',
             'type' => 'web',
         ]);
@@ -88,7 +82,7 @@ class TenantDomainControllerTest extends TestCaseTenant
 
     public function testRestoreBringsBackDomain(): void
     {
-        $domain = $this->tenantModel->domains()->create([
+        $domain = $this->tenant->domains()->create([
             'path' => 'restorekappa.com',
             'type' => 'web',
         ]);
@@ -104,7 +98,7 @@ class TenantDomainControllerTest extends TestCaseTenant
 
     public function testForceDeleteRemovesDomain(): void
     {
-        $domain = $this->tenantModel->domains()->create([
+        $domain = $this->tenant->domains()->create([
             'path' => 'forcekappa.com',
             'type' => 'web',
         ]);

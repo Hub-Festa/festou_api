@@ -4,11 +4,11 @@ namespace Tests;
 
 use App\Models\Landlord\LandlordUser;
 use App\Support\Auth\AbilityCatalog;
-use Tests\Traits\EnsuresSystemInitialization;
+use Tests\Traits\EnsuresPlatformInitialization;
 
 abstract class TestCaseAuthenticated extends TestCase
 {
-    use EnsuresSystemInitialization;
+    use EnsuresPlatformInitialization;
 
     private ?string $cachedAdminToken = null;
 

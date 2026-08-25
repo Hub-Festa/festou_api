@@ -41,7 +41,7 @@ class Landlord extends Model
         return [
             'name'             => $this->name,
             'short_name'       => $this->name,
-            'description'      => $this->description,
+            'description'      => (string) ($this->description ?? ''),
             'start_url'        => '/',
             'display'          => 'standalone',
             'background_color' => $this->branding_data["theme_data_settings"]['primary_seed_color'] ?? '',

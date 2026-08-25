@@ -18,6 +18,7 @@ class EnvironmentController extends Controller
     {
         $resolved = $this->environmentService->resolve([
             ...$request->validated(),
+            'resolved_app_domain_tenant' => $request->resolvedAppDomainTenant(),
             'request_root' => $request->root(),
             'request_host' => $request->getHost(),
         ]);
@@ -40,13 +41,19 @@ class EnvironmentController extends Controller
             'name' => $resolved['name'] ?? null,
             'subdomain' => $resolved['subdomain'] ?? null,
             'main_domain' => $resolved['main_domain'] ?? null,
+            'landlord_domain' => $resolved['landlord_domain'] ?? null,
             'domains' => $domains,
             'app_domains' => $resolved['app_domains'] ?? [],
             'theme_data_settings' => $resolved['theme_data_settings'] ?? [],
+            'public_web_metadata' => $resolved['public_web_metadata'] ?? [],
             'telemetry' => $resolved['telemetry'] ?? [],
             'firebase' => $resolved['firebase'] ?? [],
             'push' => $resolved['push'] ?? [],
         ];
+
+        if (array_key_exists('settings', $resolved)) {
+            $payload['settings'] = $resolved['settings'];
+        }
 
         return response()->json($payload);
     }

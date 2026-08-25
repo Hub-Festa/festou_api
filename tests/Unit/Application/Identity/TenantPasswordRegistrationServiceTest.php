@@ -6,7 +6,6 @@ namespace Tests\Unit\Application\Identity;
 
 use App\Application\Identity\TenantPasswordRegistrationResult;
 use App\Application\Identity\TenantPasswordRegistrationService;
-use App\Application\AccountProfiles\AccountProfileBootstrapService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
@@ -44,8 +43,7 @@ class TenantPasswordRegistrationServiceTest extends TestCase
 
         $this->service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
-            $this->app->make(AnonymousIdentityMerger::class),
-            $this->app->make(AccountProfileBootstrapService::class)
+            $this->app->make(AnonymousIdentityMerger::class)
         );
     }
 
@@ -106,8 +104,7 @@ class TenantPasswordRegistrationServiceTest extends TestCase
 
         $service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
-            $mockMerger,
-            $this->app->make(AccountProfileBootstrapService::class)
+            $mockMerger
         );
 
         $anonymous = $this->createAnonymousUser();

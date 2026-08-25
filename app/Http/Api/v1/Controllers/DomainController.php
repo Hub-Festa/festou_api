@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Controllers;
 
-use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantDomainManagementService;
 use App\Http\Api\v1\Requests\DomainStoreRequest;
 use App\Http\Controllers\Controller;
@@ -15,8 +14,7 @@ use Illuminate\Http\JsonResponse;
 class DomainController extends Controller
 {
     public function __construct(
-        private readonly TenantDomainManagementService $domainService,
-        private readonly TelemetryEmitter $telemetry
+        private readonly TenantDomainManagementService $domainService
     ) {
     }
 
@@ -24,18 +22,6 @@ class DomainController extends Controller
     {
         $tenant = Tenant::resolve();
         $domain = $this->domainService->create($tenant, $request->validated());
-
-        $user = $request->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'domain_created',
-                userId: (string) $user->_id,
-                properties: [
-                    'domain_id' => (string) $domain->_id,
-                ],
-                idempotencyKey: $request->header('X-Request-Id')
-            );
-        }
 
         return response()->json([
             'data' => $this->transform($domain),
@@ -50,18 +36,6 @@ class DomainController extends Controller
             (string) $request->route('domain_id')
         );
 
-        $user = request()->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'domain_restored',
-                userId: (string) $user->_id,
-                properties: [
-                    'domain_id' => (string) $domain->_id,
-                ],
-                idempotencyKey: request()->header('X-Request-Id')
-            );
-        }
-
         return response()->json([
             'data' => $this->transform($domain),
         ]);
@@ -75,18 +49,6 @@ class DomainController extends Controller
             (string) $request->route('domain_id')
         );
 
-        $user = request()->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'domain_deleted',
-                userId: (string) $user->_id,
-                properties: [
-                    'domain_id' => $domain_id,
-                ],
-                idempotencyKey: request()->header('X-Request-Id')
-            );
-        }
-
         return response()->json();
     }
 
@@ -97,18 +59,6 @@ class DomainController extends Controller
             $tenant,
             (string) $request->route('domain_id')
         );
-
-        $user = request()->user();
-        if ($user) {
-            $this->telemetry->emit(
-                event: 'domain_force_deleted',
-                userId: (string) $user->_id,
-                properties: [
-                    'domain_id' => $domain_id,
-                ],
-                idempotencyKey: request()->header('X-Request-Id')
-            );
-        }
 
         return response()->json();
     }

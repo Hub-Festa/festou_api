@@ -125,7 +125,7 @@ class LandlordRoleService
      */
     private function applyPermissionMutation(array $current, array $mutation): array
     {
-        // Support simple replacement (legacy behaviour) when mutation is a flat array
+        // Support simple replacement when the mutation arrives as a flat array
         if ($this->isFlatArray($mutation)) {
             return array_values(array_unique($mutation));
         }

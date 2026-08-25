@@ -38,39 +38,68 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->service = $this->app->make(TenantAppDomainManagementService::class);
     }
 
-    public function testListReturnsTenantAppDomains(): void
+    public function testListReturnsTypedTenantAppDomains(): void
     {
-        $this->tenant->update(['app_domains' => ['tenant-theta.app']]);
+        $this->tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+            'path' => 'com.tenant.theta',
+        ]);
+        $this->tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_APP_IOS,
+            'path' => 'com.tenant.theta.ios',
+        ]);
 
         $domains = $this->service->list($this->tenant);
 
-        $this->assertSame(['tenant-theta.app'], $domains);
+        $this->assertSame([
+            Tenant::APP_PLATFORM_ANDROID => 'com.tenant.theta',
+            Tenant::APP_PLATFORM_IOS => 'com.tenant.theta.ios',
+        ], $domains);
     }
 
-    public function testAddPersistsUniqueDomain(): void
+    public function testUpsertPersistsUniqueDomainPerPlatform(): void
     {
-        $domains = $this->service->add($this->tenant, 'theta-app.test');
+        $domains = $this->service->upsert(
+            $this->tenant,
+            Tenant::APP_PLATFORM_ANDROID,
+            'com.theta.mobile',
+        );
 
-        $this->assertContains('theta-app.test', $domains);
-        $this->assertContains('theta-app.test', $this->tenant->fresh()->app_domains);
+        $this->assertSame('com.theta.mobile', $domains[Tenant::APP_PLATFORM_ANDROID]);
+        $this->assertDatabaseHas('domains', [
+            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+            'path' => 'com.theta.mobile',
+        ], 'landlord');
     }
 
-    public function testAddRejectsDuplicateDomain(): void
+    public function testUpsertRejectsInvalidFormatForPlatform(): void
     {
-        $this->service->add($this->tenant, 'duplicate-app.test');
-
         $this->expectException(ValidationException::class);
-        $this->service->add($this->tenant, 'duplicate-app.test');
+        $this->service->upsert(
+            $this->tenant,
+            Tenant::APP_PLATFORM_ANDROID,
+            'invalid package',
+        );
     }
 
     public function testRemoveDeletesExistingDomain(): void
     {
-        $this->tenant->update(['app_domains' => ['remove-me.test', 'keep-me.test']]);
+        $this->tenant->domains()->create([
+            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+            'path' => 'remove-me.test',
+        ]);
 
-        $domains = $this->service->remove($this->tenant->fresh(), 'remove-me.test');
+        $domains = $this->service->remove(
+            $this->tenant->fresh(),
+            Tenant::APP_PLATFORM_ANDROID,
+        );
 
-        $this->assertSame(['keep-me.test'], $domains);
-        $this->assertSame(['keep-me.test'], $this->tenant->fresh()->app_domains);
+        $this->assertNull($domains[Tenant::APP_PLATFORM_ANDROID]);
+        $this->assertDatabaseMissing('domains', [
+            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
+            'path' => 'remove-me.test',
+            'deleted_at' => null,
+        ], 'landlord');
     }
 
     public function testRemoveRejectsMissingDomain(): void
@@ -78,7 +107,10 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->tenant->update(['app_domains' => ['present.test']]);
 
         $this->expectException(ValidationException::class);
-        $this->service->remove($this->tenant->fresh(), 'absent.test');
+        $this->service->remove(
+            $this->tenant->fresh(),
+            Tenant::APP_PLATFORM_ANDROID,
+        );
     }
 
     private function initializeSystem(): void
@@ -103,4 +135,3 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $service->initialize($payload);
     }
 }
-
