@@ -10,9 +10,13 @@ use Spatie\Multitenancy\Tasks\SwitchTenantTask;
 
 class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
 {
+    private ?string $originalDefaultConnection = null;
+
     public function makeCurrent(IsTenant $tenant): void
     {
-        if (is_null($tenant->getDatabaseName())) {
+        $tenantDatabase = $tenant->getDatabaseName();
+
+        if ($tenantDatabase === null) {
             return;
         }
 
@@ -22,17 +26,19 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
             return;
         }
 
-        // Atualiza a configuração com o banco de dados do tenant atual
+        if ($this->originalDefaultConnection === null) {
+            $this->originalDefaultConnection = DB::getDefaultConnection();
+        }
+
         config([
             "database.connections.$connectionName" => array_merge(
-                config("database.connections.$connectionName"),
-                ['database' => $tenant->getDatabaseName()]
-            )
+                config("database.connections.$connectionName", []),
+                ['database' => $tenantDatabase]
+            ),
         ]);
 
         DB::purge($connectionName);
         DB::setDefaultConnection($connectionName);
-
     }
 
     public function forgetCurrent(): void
@@ -44,11 +50,16 @@ class SwitchMongoTenantDatabaseTask implements SwitchTenantTask
         }
 
         config([
-            "database.connections.$connectionName.database" => null
+            "database.connections.$connectionName.database" => null,
         ]);
 
-        DB::purge($connectionName);
-        DB::setDefaultConnection(config('database.default'));
+        $originalDefaultConnection = $this->originalDefaultConnection;
+        $this->originalDefaultConnection = null;
 
+        DB::purge($connectionName);
+
+        if ($originalDefaultConnection !== null) {
+            DB::setDefaultConnection($originalDefaultConnection);
+        }
     }
 }
