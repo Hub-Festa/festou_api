@@ -4,32 +4,36 @@ declare(strict_types=1);
 
 namespace App\Application\Identity;
 
-use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Exceptions\Identity\IdentityAlreadyExistsException;
 use App\Models\Landlord\Tenant;
-use App\Support\Auth\AbilityCatalog;
 use App\Models\Tenants\AccountUser;
+use App\Support\Auth\AbilityCatalog;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\NewAccessToken;
 use MongoDB\BSON\ObjectId;
+use RuntimeException;
 
 class TenantPasswordRegistrationService
 {
     public function __construct(
         private readonly PasswordIdentityRegistrar $registrar,
         private readonly AnonymousIdentityMerger $identityMerger,
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
+     *
      * @throws IdentityAlreadyExistsException
      */
     public function register(Tenant $tenant, array $payload): TenantPasswordRegistrationResult
     {
+        $tenantId = $this->tenantId($tenant);
+
         $user = $this->registrar->register([
             'name' => $payload['name'],
             'emails' => [strtolower((string) $payload['email'])],
@@ -83,6 +87,7 @@ class TenantPasswordRegistrationService
             'auth:password-register',
             $this->sanitizeAbilities($abilities)
         );
+        $this->stampTenantId($token, $tenantId);
         $plainToken = $token->plainTextToken;
         $expiresAt = null;
 
@@ -99,7 +104,7 @@ class TenantPasswordRegistrationService
     }
 
     /**
-     * @param Collection<int, AccountUser> $anonymousUsers
+     * @param  Collection<int, AccountUser>  $anonymousUsers
      */
     private function mergeAnonymousUsers(AccountUser $user, Collection $anonymousUsers): void
     {
@@ -120,8 +125,25 @@ class TenantPasswordRegistrationService
         }
     }
 
+    private function tenantId(Tenant $tenant): string
+    {
+        $tenantId = trim((string) $tenant->getAttribute('_id'));
+
+        if ($tenantId === '') {
+            throw new RuntimeException('Cannot issue tenant account token without tenant id.');
+        }
+
+        return $tenantId;
+    }
+
+    private function stampTenantId(NewAccessToken $newToken, string $tenantId): void
+    {
+        $newToken->accessToken->setAttribute('tenant_id', $tenantId);
+        $newToken->accessToken->save();
+    }
+
     /**
-     * @param array<int, string> $abilities
+     * @param  array<int, string>  $abilities
      * @return array<int, string>
      */
     private function sanitizeAbilities(array $abilities): array

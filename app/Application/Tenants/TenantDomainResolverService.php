@@ -14,11 +14,17 @@ class TenantDomainResolverService
     {
         $normalized = Str::lower(trim($host));
 
-        $tenant = Tenant::where('domains', 'all', [$normalized])->first();
-        if ($tenant !== null) {
-            return $tenant;
+        $domain = Domains::query()
+            ->where('path', $normalized)
+            ->where('type', Tenant::DOMAIN_TYPE_WEB)
+            ->first();
+
+        if ($domain?->tenant instanceof Tenant) {
+            return $domain->tenant;
         }
 
-        return Domains::where('path', $normalized)->first()?->tenant;
+        return Tenant::query()
+            ->where('domains', 'all', [$normalized])
+            ->first();
     }
 }
