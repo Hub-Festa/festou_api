@@ -87,7 +87,7 @@ class TenantAppDomainResolverServiceTest extends TestCase
             landlord: ['name' => 'Landlord HQ'],
             tenant: ['name' => 'Tenant Theta', 'subdomain' => 'tenant-theta'],
             role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'fixture-password-placeholder'],
             themeDataSettings: [
                 'brightness_default' => 'light',
                 'primary_seed_color' => '#fff',
