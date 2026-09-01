@@ -10,5 +10,4 @@ return [
             'target_type' => 'account_profile',
         ],
     ],
-    'publicly_navigable_profile_types' => [],
 ];

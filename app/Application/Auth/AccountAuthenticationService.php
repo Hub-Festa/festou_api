@@ -5,17 +5,17 @@ declare(strict_types=1);
 namespace App\Application\Auth;
 
 use App\Exceptions\Auth\InvalidCredentialsException;
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
-use App\Support\Auth\AbilityCatalog;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Laravel\Sanctum\NewAccessToken;
-use RuntimeException;
 
 class AccountAuthenticationService
 {
+    public function __construct(
+        private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
+    ) {}
+
     public function login(string $email, string $password, string $deviceName): AuthenticationResult
     {
         $user = $this->findUserByEmail($email);
@@ -26,24 +26,24 @@ class AccountAuthenticationService
 
         $account = Account::current();
         if (! $account) {
-            $accessIds = $user->getAccessToIds();
-            if ($accessIds !== []) {
-                $account = Account::query()
-                    ->whereIn('_id', $accessIds)
-                    ->first();
-            }
+            $account = $this->resolveSingleAccessibleAccount($user);
+        }
+        if (! $account || ! $user->haveAccessTo($account)) {
+            throw new InvalidCredentialsException;
         }
 
-        $abilities = $account ? $user->getPermissions($account) : [];
-        $tenantId = $this->currentTenantId();
+        $abilities = $user->getPermissions($account);
 
-        $token = $user->createToken(
-            $deviceName,
-            $this->sanitizeAbilities($user, $abilities)
-        );
-        $this->stampTenantId($token, $tenantId);
+        $token = $this->tenantScopedAccessTokenService
+            ->issueForAccountUser(
+                $user,
+                $deviceName,
+                $this->sanitizeAbilities($user, $abilities),
+                accountId: $account ? (string) $account->_id : null
+            )
+            ->plainTextToken;
 
-        return new AuthenticationResult($user, $token->plainTextToken);
+        return new AuthenticationResult($user, $token);
     }
 
     public function logout(AccountUser $user, bool $allDevices, ?string $deviceName = null): void
@@ -66,20 +66,16 @@ class AccountAuthenticationService
             ->first();
     }
 
-    private function currentTenantId(): string
+    private function resolveSingleAccessibleAccount(AccountUser $user): ?Account
     {
-        $tenantId = trim((string) (Tenant::current()?->getAttribute('_id') ?? ''));
-        if ($tenantId === '') {
-            throw new RuntimeException('Cannot issue tenant account token without current tenant context.');
+        $accessIds = $user->getAccessToIds();
+        if (count($accessIds) !== 1) {
+            return null;
         }
 
-        return $tenantId;
-    }
-
-    private function stampTenantId(NewAccessToken $newToken, string $tenantId): void
-    {
-        $newToken->accessToken->setAttribute('tenant_id', $tenantId);
-        $newToken->accessToken->save();
+        return Account::query()
+            ->where('_id', $accessIds[0])
+            ->first();
     }
 
     /**
@@ -89,16 +85,11 @@ class AccountAuthenticationService
     private function sanitizeAbilities(AccountUser $user, array $abilities): array
     {
         if (in_array('*', $abilities, true)) {
-            Log::warning('Wildcard abilities expanded to explicit list for tenant token.', [
+            Log::warning('Wildcard account abilities preserved for account-bound token.', [
                 'user_id' => (string) $user->_id,
             ]);
 
-            $catalog = AbilityCatalog::all();
-
-            return array_values(array_filter(
-                $catalog,
-                static fn (string $ability): bool => str_starts_with($ability, 'account-')
-            ));
+            return ['*'];
         }
 
         return $abilities;

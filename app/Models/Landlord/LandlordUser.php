@@ -14,9 +14,9 @@ use MongoDB\Laravel\Relations\BelongsTo;
 use MongoDB\Laravel\Relations\EmbedsMany;
 use Spatie\Multitenancy\Models\Concerns\UsesLandlordConnection;
 
-class LandlordUser extends Authenticatable {
-
-    use HasApiTokens, Notifiable, SoftDeletes, DocumentModel, UsesLandlordConnection;
+class LandlordUser extends Authenticatable
+{
+    use DocumentModel, HasApiTokens, Notifiable, SoftDeletes, UsesLandlordConnection;
 
     protected $table = 'landlord_users';
 
@@ -38,26 +38,28 @@ class LandlordUser extends Authenticatable {
 
     protected $casts = [
         'email_verified_at' => 'datetime',
-        'password' => 'hashed',
         'verified_at' => 'datetime',
     ];
 
     protected static function booted(): void
     {
-        static::creating(function (LandlordUser $user): void {
+        static::saving(function (LandlordUser $user): void {
             $user->identity_state ??= 'registered';
             $user->credentials ??= [];
             $user->promotion_audit ??= [];
             $user->emails ??= [];
             $user->phones ??= [];
+            $user->stripLegacyPasswordAttributes();
         });
     }
 
-    public function landlordRole(): BelongsTo {
+    public function landlordRole(): BelongsTo
+    {
         return $this->belongsTo(LandlordRole::class);
     }
 
-    public function tenantRoles(): EmbedsMany {
+    public function tenantRoles(): EmbedsMany
+    {
         return $this->embedsMany(TenantRole::class, 'tenant_roles');
     }
 
@@ -97,4 +99,8 @@ class LandlordUser extends Authenticatable {
         return app(LandlordUserAccessService::class);
     }
 
+    private function stripLegacyPasswordAttributes(): void
+    {
+        $this->unset(['password', 'password_type']);
+    }
 }

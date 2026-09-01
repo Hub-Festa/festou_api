@@ -2,6 +2,7 @@
 
 namespace App\Http\Api\v1\Controllers;
 
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Application\Tenants\TenantRoleManagementService;
 use App\Http\Api\v1\Requests\TenantRoleDestroyRequest;
 use App\Http\Api\v1\Requests\TenantRoleStoreRequest;
@@ -14,9 +15,9 @@ use Illuminate\Http\Request;
 class TenantRolesController extends Controller
 {
     public function __construct(
-        private readonly TenantRoleManagementService $tenantRoleService
-    ) {
-    }
+        private readonly TenantRoleManagementService $tenantRoleService,
+        private readonly TelemetryEmitter $telemetry
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -33,6 +34,18 @@ class TenantRolesController extends Controller
     {
         $tenant = Tenant::resolve();
         $role = $this->tenantRoleService->create($tenant, $request->validated());
+
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_role_created',
+                userId: (string) $user->_id,
+                properties: [
+                    'role_id' => (string) $role->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $role,
@@ -52,15 +65,28 @@ class TenantRolesController extends Controller
 
     public function update(
         TenantRoleUpdateRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
+        $validated = $request->validated();
         $updated = $this->tenantRoleService->update(
             $tenant,
             $role_id,
-            $request->validated()
+            $validated
         );
+
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_role_updated',
+                userId: (string) $user->_id,
+                properties: [
+                    'role_id' => $role_id,
+                    'changed_fields' => array_keys($validated),
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $updated,
@@ -69,8 +95,7 @@ class TenantRolesController extends Controller
 
     public function destroy(
         TenantRoleDestroyRequest $request
-    ): JsonResponse
-    {
+    ): JsonResponse {
         $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $this->tenantRoleService->delete(
@@ -78,6 +103,18 @@ class TenantRolesController extends Controller
             $role_id,
             $request->validated()['background_role_id']
         );
+
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_role_deleted',
+                userId: (string) $user->_id,
+                properties: [
+                    'role_id' => $role_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json();
     }
@@ -88,6 +125,18 @@ class TenantRolesController extends Controller
         $tenant = Tenant::resolve();
         $this->tenantRoleService->forceDelete($tenant, $role_id);
 
+        $user = request()->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_role_force_deleted',
+                userId: (string) $user->_id,
+                properties: [
+                    'role_id' => $role_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
+
         return response()->json();
     }
 
@@ -96,6 +145,18 @@ class TenantRolesController extends Controller
         $role_id = (string) $request->route('role_id');
         $tenant = Tenant::resolve();
         $role = $this->tenantRoleService->restore($tenant, $role_id);
+
+        $user = request()->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_role_restored',
+                userId: (string) $user->_id,
+                properties: [
+                    'role_id' => (string) $role->_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'data' => $role,

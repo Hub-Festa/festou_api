@@ -8,17 +8,17 @@ use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use MongoDB\BSON\ObjectId;
 
 class LandlordUserCreator
 {
     public function __construct(
         private readonly LandlordUserAccessService $accessService
-    ) {
-    }
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(array $payload, string $roleId, ?string $operatorId = null): LandlordUser
     {
@@ -26,6 +26,7 @@ class LandlordUserCreator
 
         return DB::connection('landlord')->transaction(function () use ($payload, $role, $operatorId): LandlordUser {
             $email = strtolower($payload['email']);
+            $secretHash = Hash::make((string) $payload['password']);
 
             $promotionAuditEntry = [
                 'from_state' => 'anonymous',
@@ -37,14 +38,14 @@ class LandlordUserCreator
             $user = LandlordUser::create([
                 'name' => $payload['name'],
                 'emails' => [$email],
-                'password' => $payload['password'],
                 'identity_state' => 'registered',
                 'credentials' => [],
                 'promotion_audit' => [$promotionAuditEntry],
             ]);
 
             $this->accessService->ensureEmail($user, $email);
-            $this->accessService->syncCredential($user, 'password', $email, $user->password);
+            $this->accessService->syncPasswordCredentialsForEmails($user, $secretHash);
+            $this->accessService->removeLegacyPasswordState($user);
 
             $role->users()->save($user);
 

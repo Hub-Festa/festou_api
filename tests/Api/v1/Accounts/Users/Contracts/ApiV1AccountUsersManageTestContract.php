@@ -2,6 +2,8 @@
 
 namespace Tests\Api\v1\Accounts\Users\Contracts;
 
+use App\Models\Tenants\Account;
+use App\Models\Tenants\AccountRoleTemplate;
 use Illuminate\Testing\TestResponse;
 use Tests\Helpers\RoleLabels;
 use Tests\Helpers\UserLabels;
@@ -9,13 +11,20 @@ use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->ensureAccountSupportRoles();
+    }
+
     protected string $base_api_url {
         get{
-            return $this->base_api_account."users/";
+            return $this->base_api_account.'users/';
         }
     }
 
-    public function testAccountUserAdminCreation(): void {
+    public function testAccountUserAdminCreation(): void
+    {
         $response = $this->createUser(
             $this->account->user_admin,
             $this->account->role_admin
@@ -23,7 +32,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         $response->assertStatus(201);
     }
 
-    public function testAccountUserUserManagerCreation(): void {
+    public function testAccountUserUserManagerCreation(): void
+    {
         $response = $this->createUser(
             $this->account->user_users_manager,
             $this->account->role_user_manager
@@ -31,7 +41,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         $response->assertStatus(201);
     }
 
-    public function testAccountUserVisitorCreation(): void {
+    public function testAccountUserVisitorCreation(): void
+    {
         $response = $this->createUser(
             $this->account->user_visitor,
             $this->account->role_visitor
@@ -39,7 +50,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         $response->assertStatus(201);
     }
 
-    public function testAccountUserDisposableCreation(): void {
+    public function testAccountUserDisposableCreation(): void
+    {
         $response = $this->createUser(
             $this->account->user_disposable,
             $this->account->role_visitor
@@ -47,7 +59,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         $response->assertStatus(201);
     }
 
-    public function testAccountUserDetach(): void {
+    public function testAccountUserDetach(): void
+    {
         $responseShow = $this->accountUserShow($this->account->user_disposable->user_id);
         $responseShow->assertStatus(200);
 
@@ -58,14 +71,15 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         $responseShowTenant2->assertStatus(404);
     }
 
-    public function testAttachExistentUserToAccount():void {
+    public function testAttachExistentUserToAccount(): void
+    {
 
         $response = $this->accountUserCreate([
-            "name" => $this->account->user_disposable->name,
-            "email" => $this->account->user_disposable->email_1,
-            "password" => $this->account->user_disposable->password,
-            "password_confirmation" => $this->account->user_disposable->password,
-            "role_id" => $this->account->role_visitor->id,
+            'name' => $this->account->user_disposable->name,
+            'email' => $this->account->user_disposable->email_1,
+            'password' => $this->account->user_disposable->password,
+            'password_confirmation' => $this->account->user_disposable->password,
+            'role_id' => $this->account->role_visitor->id,
         ]);
 
         $response->assertStatus(201);
@@ -78,11 +92,11 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
     public function testAccountUserCreationRejectsPasswordExceedingMaxLength(): void
     {
         $response = $this->accountUserCreate([
-            "name" => $this->account->user_disposable->name,
-            "email" => $this->account->user_disposable->email_1,
-            "password" => str_repeat('A', 33),
-            "password_confirmation" => str_repeat('A', 33),
-            "role_id" => $this->account->role_visitor->id,
+            'name' => $this->account->user_disposable->name,
+            'email' => $this->account->user_disposable->email_1,
+            'password' => str_repeat('A', 33),
+            'password_confirmation' => str_repeat('A', 33),
+            'role_id' => $this->account->role_visitor->id,
         ]);
 
         $response->assertStatus(422);
@@ -91,21 +105,22 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
 
     public function testAccountUserCreationRejectsEmailExceedingMaxLength(): void
     {
-        $email = str_repeat('a', 246) . '@example.org';
+        $email = str_repeat('a', 246).'@example.org';
 
         $response = $this->accountUserCreate([
-            "name" => $this->account->user_disposable->name,
-            "email" => $email,
-            "password" => $this->account->user_disposable->password,
-            "password_confirmation" => $this->account->user_disposable->password,
-            "role_id" => $this->account->role_visitor->id,
+            'name' => $this->account->user_disposable->name,
+            'email' => $email,
+            'password' => $this->account->user_disposable->password,
+            'password_confirmation' => $this->account->user_disposable->password,
+            'role_id' => $this->account->role_visitor->id,
         ]);
 
         $response->assertStatus(422);
         $response->assertJsonPath('errors.email.0', 'The email field must not be greater than 255 characters.');
     }
 
-    public function testAccountUsersList(): void {
+    public function testAccountUsersList(): void
+    {
 
         $accountUserList = $this->accountUsersList();
         $accountUserList->assertStatus(200);
@@ -115,7 +130,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
 
     }
 
-    public function testAccountDetachOrDelete(): void {
+    public function testAccountDetachOrDelete(): void
+    {
         $rolesList = $this->accountUsersList();
         $rolesList->assertOk();
 
@@ -144,29 +160,31 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         $showDeleted->assertStatus(404);
     }
 
-    protected function createUser(UserLabels $user, RoleLabels $role): TestResponse {
+    protected function createUser(UserLabels $user, RoleLabels $role): TestResponse
+    {
         $user->name = fake()->name();
         $user->email_1 = fake()->email();
         $user->email_2 = fake()->email();
         $user->password = fake()->password(8);
 
         $response = $this->accountUserCreate([
-            "name" => $user->name,
-            "email" => $user->email_1,
-            "password" => $user->password,
-            "password_confirmation" => $user->password,
-            "role_id" => $role->id,
+            'name' => $user->name,
+            'email' => $user->email_1,
+            'password' => $user->password,
+            'password_confirmation' => $user->password,
+            'role_id' => $role->id,
 
         ]);
 
         $response->assertStatus(201);
 
-        $user->user_id = $response->json()['data']["id"];
+        $user->user_id = $response->json()['data']['id'];
 
         return $response;
     }
 
-    protected function accountUserCreate(array $data): TestResponse {
+    protected function accountUserCreate(array $data): TestResponse
+    {
         return $this->json(
             method: 'post',
             uri: "{$this->base_api_url}",
@@ -175,7 +193,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserCreateSecondaryAccount(array $data): TestResponse {
+    protected function accountUserCreateSecondaryAccount(array $data): TestResponse
+    {
         return $this->json(
             method: 'post',
             uri: "{$this->base_api_url}",
@@ -184,7 +203,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserCreateMainTenant(array $data): TestResponse {
+    protected function accountUserCreateMainTenant(array $data): TestResponse
+    {
         return $this->json(
             method: 'post',
             uri: "{$this->base_api_url}",
@@ -193,7 +213,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUsersList(): TestResponse {
+    protected function accountUsersList(): TestResponse
+    {
         return $this->json(
             method: 'get',
             uri: "{$this->base_api_url}",
@@ -201,7 +222,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUsersListArchived(): TestResponse {
+    protected function accountUsersListArchived(): TestResponse
+    {
         return $this->json(
             method: 'get',
             uri: "{$this->base_api_url}?archived=true",
@@ -209,7 +231,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserShow(string $user_id): TestResponse {
+    protected function accountUserShow(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'get',
             uri: "{$this->base_api_url}$user_id",
@@ -217,7 +240,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserShowSecondaryAccount(string $user_id): TestResponse {
+    protected function accountUserShowSecondaryAccount(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'get',
             uri: "{$this->base_api_url}$user_id",
@@ -225,7 +249,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserUpdate(string $user_id, array $data): TestResponse {
+    protected function accountUserUpdate(string $user_id, array $data): TestResponse
+    {
         return $this->json(
             method: 'patch',
             uri: "{$this->base_api_url}$user_id",
@@ -234,7 +259,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserAddEmails(string $user_id, array $data): TestResponse {
+    protected function accountUserAddEmails(string $user_id, array $data): TestResponse
+    {
         return $this->json(
             method: 'patch',
             uri: "{$this->base_api_url}$user_id/emails",
@@ -243,7 +269,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserRemoveEmails(string $user_id, array $data): TestResponse {
+    protected function accountUserRemoveEmails(string $user_id, array $data): TestResponse
+    {
         return $this->json(
             method: 'delete',
             uri: "{$this->base_api_url}$user_id/emails",
@@ -252,7 +279,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserDelete(string $user_id): TestResponse {
+    protected function accountUserDelete(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'delete',
             uri: "{$this->base_api_url}$user_id",
@@ -260,7 +288,8 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserRestore(string $user_id): TestResponse {
+    protected function accountUserRestore(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'post',
             uri: "{$this->base_api_url}$user_id/restore",
@@ -268,11 +297,53 @@ abstract class ApiV1AccountUsersManageTestContract extends TestCaseAccount
         );
     }
 
-    protected function accountUserForceDelete(string $user_id): TestResponse {
+    protected function accountUserForceDelete(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'delete',
             uri: "{$this->base_api_url}$user_id/force_delete",
             headers: $this->getHeaders(),
         );
+    }
+
+    private function ensureAccountSupportRoles(): void
+    {
+        $account = Account::query()->where('slug', $this->account->slug)->first();
+        if (! $account instanceof Account) {
+            return;
+        }
+
+        $defaults = [
+            'role_user_manager' => [
+                'name' => 'Users Manager',
+                'permissions' => ['account-users:view', 'account-users:create'],
+            ],
+            'role_visitor' => [
+                'name' => 'Visitor',
+                'permissions' => ['account-users:view', 'account-users:create'],
+            ],
+        ];
+
+        foreach ($defaults as $property => $definition) {
+            /** @var AccountRoleTemplate|null $role */
+            $role = $account->roleTemplates()
+                ->withTrashed()
+                ->where('name', $definition['name'])
+                ->first();
+
+            if (! $role instanceof AccountRoleTemplate) {
+                $role = $account->roleTemplates()->create($definition);
+            } else {
+                if ($role->trashed()) {
+                    $role->restore();
+                }
+
+                $role->permissions = $definition['permissions'];
+                $role->save();
+            }
+
+            $this->account->{$property}->name = $role->name;
+            $this->account->{$property}->id = (string) $role->_id;
+        }
     }
 }

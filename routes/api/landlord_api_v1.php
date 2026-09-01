@@ -1,14 +1,14 @@
 <?php
 
-use App\Http\Api\v1\Controllers\TenantController;
-use App\Http\Api\v1\Controllers\LandlordBrandingController;
-use App\Http\Api\v1\Controllers\BrandingController;
-use App\Http\Api\v1\Controllers\LandlordUserController;
-use Illuminate\Support\Facades\Route;
 use App\Http\Api\v1\Controllers\AuthControllerLandlord;
+use App\Http\Api\v1\Controllers\LandlordBrandingController;
 use App\Http\Api\v1\Controllers\LandlordRolesController;
-use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+use App\Http\Api\v1\Controllers\LandlordTenantTelemetrySettingsController;
+use App\Http\Api\v1\Controllers\LandlordUserController;
 use App\Http\Api\v1\Controllers\MeController;
+use App\Http\Api\v1\Controllers\ProfileControllerLandlord;
+use App\Http\Api\v1\Controllers\TenantController;
+use Illuminate\Support\Facades\Route;
 
 Route::prefix('profile')
     ->middleware(['auth:sanctum'])
@@ -24,7 +24,7 @@ Route::prefix('profile')
         Route::patch('/phones', [ProfileControllerLandlord::class, 'addPhones']);
 
         Route::delete('/phones', [ProfileControllerLandlord::class, 'removePhone']);
-});
+    });
 
 Route::get('/me', [MeController::class, 'landlord'])
     ->middleware('auth:sanctum');
@@ -91,10 +91,10 @@ Route::prefix('users')->group(function () {
 
     Route::delete('/{user_id}', [LandlordUserController::class, 'destroy'])
         ->middleware('auth:sanctum', 'abilities:landlord-users:delete');
-//
-//    // Alterar senha
-//    Route::put('/{id}/password', [UserController::class, 'updatePassword'])
-//        ->name('users.password.update');
+    //
+    //    // Alterar senha
+    //    Route::put('/{id}/password', [UserController::class, 'updatePassword'])
+    //        ->name('users.password.update');
 });
 
 Route::prefix('roles')->group(function () {
@@ -125,3 +125,14 @@ Route::prefix('branding')->group(function () {
         ->middleware('auth:sanctum', 'abilities:tenant-branding:update');
 
 });
+
+Route::prefix('{tenant_slug}/settings')
+    ->middleware('auth:sanctum')
+    ->group(function () {
+        Route::get('/telemetry', [LandlordTenantTelemetrySettingsController::class, 'index'])
+            ->middleware('abilities:telemetry-settings:update');
+        Route::post('/telemetry', [LandlordTenantTelemetrySettingsController::class, 'store'])
+            ->middleware('abilities:telemetry-settings:update');
+        Route::delete('/telemetry/{type}', [LandlordTenantTelemetrySettingsController::class, 'destroy'])
+            ->middleware('abilities:telemetry-settings:update');
+    });

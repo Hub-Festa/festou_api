@@ -8,8 +8,10 @@
     "require": {
         "php": "^8.4",
         "ext-mongodb": "^2.0",
+        "belluga/contact-channels": "dev-main",
         "intervention/image": "^3.11",
         "intervention/image-laravel": "^1.5",
+        "kreait/firebase-php": "^7.0",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.10.1",
@@ -28,14 +30,51 @@
         "nunomaduro/collision": "^8.6",
         "phpunit/phpunit": "^11.5.3"
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_media"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_rich_text"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_settings"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_push_handler"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_discovery_filters"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_deep_links"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_email"
+        },
+        {
+            "type": "path",
+            "url": "packages/belluga/belluga_contact_channels"
+        }
+    ],
     "autoload": {
         "psr-4": {
             "App\\": "app/",
-            "Shared\\DeepLinks\\": "packages/shared/deep_links/src/",
-            "Shared\\Media\\": "packages/shared/media/src/",
-            "Shared\\Favorites\\": "packages/shared/favorites/src/",
-            "Shared\\Settings\\": "packages/shared/settings/src/",
-            "Shared\\PushHandler\\": "packages/shared/push_handler/src/",
+            "Belluga\\RichText\\": "packages/belluga/belluga_rich_text/src/",
+            "Belluga\\Settings\\": "packages/belluga/belluga_settings/src/",
+            "Belluga\\PushHandler\\": "packages/belluga/belluga_push_handler/src/",
+            "Belluga\\DiscoveryFilters\\": "packages/belluga/belluga_discovery_filters/src/",
+            "Belluga\\Media\\": "packages/belluga/belluga_media/src/",
+            "Belluga\\DeepLinks\\": "packages/belluga/belluga_deep_links/src/",
+            "Belluga\\Email\\": "packages/belluga/belluga_email/src/",
+            "Belluga\\ContactChannels\\": "packages/belluga/belluga_contact_channels/src/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
         }
@@ -64,6 +103,13 @@
         "dev": [
             "Composer\\Config::disableProcessTimeout",
             "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite"
+        ],
+        "architecture:guardrails": [
+            "@php scripts/architecture_guardrails.php"
+        ],
+        "lint:strict": [
+            "@php ./vendor/bin/pint --test",
+            "@composer run architecture:guardrails"
         ]
     },
     "extra": {

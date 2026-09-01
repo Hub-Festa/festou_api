@@ -1,13 +1,20 @@
 <?php
 
+use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
-use \Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Spatie\Multitenancy\Exceptions\NoCurrentTenant;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+
+$isApiRequest = static function (Request $request): bool {
+    return $request->is('api/*') || $request->is('admin/api/*');
+};
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -35,23 +42,33 @@ return Application::configure(basePath: dirname(__DIR__))
             };
 
             $mainHost = parse_url(config('app.url'), PHP_URL_HOST);
-            if (!is_string($mainHost) || $mainHost === '') {
+            if (! is_string($mainHost) || $mainHost === '') {
                 $mainHost = (string) config('app.url');
             }
             $mainHost = trim($mainHost);
-            $escapedMainHost = preg_quote($mainHost, '/');
             $tenantDomainPattern = $mainHost === ''
                 ? '.+'
-                : '^(?!' . $escapedMainHost . '$)(?!(?:[^.]+\.){2,}' . $escapedMainHost . '$).+';
+                : '^(?!'.preg_quote($mainHost, '/').'$).+';
 
             Route::domain($mainHost)->group(function () use ($registerProjectRoutes): void {
+                Route::prefix('api/v1/initialize')
+                    ->middleware('guest')
+                    ->group(base_path('routes/api/initialize.php'));
+
+                $registerProjectRoutes(
+                    'api/v1/initialize',
+                    'guest',
+                    base_path('routes/api/project_initialize.php'),
+                    'project_initialize'
+                );
+
                 Route::prefix('admin/api/v1')
                     ->middleware('landlord')
                     ->group(base_path('routes/api/landlord_api_v1.php'));
 
                 $registerProjectRoutes(
                     'api/v1',
-                    'tenant-maybe',
+                    [],
                     base_path('routes/api/project_landlord_public_api_v1.php'),
                     'project_landlord_public_api_v1'
                 );
@@ -71,12 +88,8 @@ return Application::configure(basePath: dirname(__DIR__))
             Route::domain('{tenant_domain}')
                 ->where(['tenant_domain' => $tenantDomainPattern])
                 ->group(function () use ($registerProjectRoutes): void {
-                    Route::prefix('api/v1/initialize')
-                        ->middleware('guest')
-                        ->group(base_path('routes/api/initialize.php'));
-
                     Route::prefix('admin/api/v1')
-                        ->middleware('tenant')
+                        ->middleware(['tenant', 'landlord'])
                         ->group(base_path('routes/api/tenant_api_v1.php'));
 
                     Route::prefix('api/v1')
@@ -88,13 +101,6 @@ return Application::configure(basePath: dirname(__DIR__))
                         ->group(base_path('routes/api/account_api_v1.php'));
 
                     $registerProjectRoutes(
-                        'api/v1/initialize',
-                        'guest',
-                        base_path('routes/api/project_initialize.php'),
-                        'project_initialize'
-                    );
-
-                    $registerProjectRoutes(
                         'api/v1',
                         'tenant-maybe',
                         base_path('routes/api/project_tenant_public_api_v1.php'),
@@ -103,9 +109,16 @@ return Application::configure(basePath: dirname(__DIR__))
 
                     $registerProjectRoutes(
                         'admin/api/v1',
-                        'tenant',
+                        ['tenant', 'landlord'],
                         base_path('routes/api/project_tenant_admin_api_v1.php'),
                         'project_tenant_admin_api_v1'
+                    );
+
+                    $registerProjectRoutes(
+                        'admin/api/v1',
+                        ['tenant'],
+                        base_path('routes/api/project_tenant_package_admin_api_v1.php'),
+                        'project_tenant_package_admin_api_v1'
                     );
 
                     $registerProjectRoutes(
@@ -117,11 +130,32 @@ return Application::configure(basePath: dirname(__DIR__))
                 });
         }
     )
-    ->withMiddleware(function (Middleware $middleware) {
+    ->withMiddleware(function (Middleware $middleware) use ($isApiRequest) {
+        // Cloudflare terminates TLS at the edge and forwards traffic through trusted proxies.
+        // We trust forwarding headers only from configured proxy ranges.
+        $middleware->trustProxies(
+            at: env('TRUSTED_PROXIES', '172.16.0.0/12'),
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO
+        );
+
+        $middleware->redirectGuestsTo(function (Request $request) use ($isApiRequest): ?string {
+            if ($isApiRequest($request)) {
+                return null;
+            }
+
+            return Route::has('login') ? route('login') : url('/');
+        });
+
+        // Platform-wide API security baseline (L1/L2/L3 + idempotency + edge/origin controls).
+        $middleware->prepend(\App\Http\Middleware\PublicTenantMediaCors::class);
+        $middleware->append(\App\Http\Middleware\ApiSecurityHardening::class);
 
         $middleware
             ->group(
-                "landlord",
+                'landlord',
                 [
                     \App\Http\Middleware\LandlordValidation::class,
                 ]
@@ -129,7 +163,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware
             ->group(
-                "account",
+                'account',
                 [
                     StartSession::class,
                     \App\Http\Middleware\InitializeAccount::class,
@@ -156,15 +190,32 @@ return Application::configure(basePath: dirname(__DIR__))
             );
 
         $middleware->alias([
+            'auth' => \App\Http\Middleware\Authenticate::class,
             'ability' => \Laravel\Sanctum\Http\Middleware\CheckForAnyAbility::class,
             'abilities' => \Laravel\Sanctum\Http\Middleware\CheckAbilities::class,
         ]);
     })
-    ->withExceptions(function (Exceptions $exceptions) {
+    ->withExceptions(function (Exceptions $exceptions) use ($isApiRequest) {
+        $exceptions->renderable(function (AuthenticationException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json(['message' => $e->getMessage()], 401);
+        });
+        $exceptions->renderable(function (ConcurrencyConflictException $e, Request $request) use ($isApiRequest) {
+            if (! $isApiRequest($request)) {
+                return null;
+            }
+
+            return response()->json([
+                'message' => 'A concurrency conflict occurred. Please try again.',
+            ], 409);
+        });
         $exceptions->renderable(function (NotFoundHttpException $e) {
             return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
         });
         $exceptions->renderable(function (NoCurrentTenant $e) {
-            return response()->json(['message' => 'Tenant not found for this host.'], 400);
+            return response()->json(['message' => 'Resource you are looking for was not found.'], 404);
         });
     })->create();

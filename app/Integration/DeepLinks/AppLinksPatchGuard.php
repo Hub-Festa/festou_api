@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Integration\DeepLinks;
 
+use Belluga\DeepLinks\Contracts\AppLinksIdentifierGatewayContract;
+use Belluga\DeepLinks\Contracts\AppLinksSettingsSourceContract;
+use Belluga\Settings\Contracts\SettingsNamespacePatchGuardContract;
+use Belluga\Settings\Support\SettingsNamespaceDefinition;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
-use Shared\DeepLinks\Contracts\AppLinksIdentifierGatewayContract;
-use Shared\DeepLinks\Contracts\AppLinksSettingsSourceContract;
-use Shared\Settings\Contracts\SettingsNamespacePatchGuardContract;
-use Shared\Settings\Support\SettingsNamespaceDefinition;
 
 class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
 {
@@ -28,29 +28,17 @@ class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
         array $payload,
         SettingsNamespaceDefinition $definition,
     ): void {
-        if ($namespace !== 'app_links') {
-            return;
-        }
-
-        $normalizedPatch = $this->normalizePatchPayload($payload, $definition->namespace);
-        $errors = [];
-
-        if ($this->containsRetiredPathAuthority($normalizedPatch)) {
-            $errors['ios.paths'][] = 'Project deep-link route policy owns Apple association paths; app_links.ios.paths is retired.';
-        }
-
-        if ($scope !== 'tenant') {
-            if ($errors !== []) {
-                throw ValidationException::withMessages($errors);
-            }
-
+        if ($scope !== 'tenant' || $namespace !== 'app_links') {
             return;
         }
 
         $current = $this->settingsSource->currentAppLinksSettings();
+        $normalizedPatch = $this->normalizePatchPayload($payload, $definition->namespace);
         foreach ($normalizedPatch as $path => $value) {
             Arr::set($current, $path, $value);
         }
+
+        $errors = [];
 
         $fingerprints = $this->normalizeFingerprints(data_get($current, 'android.sha256_cert_fingerprints', []));
         if ($fingerprints !== [] && ! $this->identifierGateway->hasIdentifierForPlatform('android')) {
@@ -106,24 +94,6 @@ class AppLinksPatchGuard implements SettingsNamespacePatchGuardContract
         }
 
         return $normalized;
-    }
-
-    /**
-     * @param  array<string, mixed>  $normalizedPatch
-     */
-    private function containsRetiredPathAuthority(array $normalizedPatch): bool
-    {
-        foreach (array_keys($normalizedPatch) as $path) {
-            if (! is_string($path)) {
-                continue;
-            }
-
-            if ($path === 'ios.paths' || str_starts_with($path, 'ios.paths.')) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

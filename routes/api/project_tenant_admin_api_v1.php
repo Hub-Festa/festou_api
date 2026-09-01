@@ -1,5 +1,16 @@
 <?php
 
-declare(strict_types=1);
+use App\Http\Api\v1\Controllers\AccountOnboardingsController;
+use App\Http\Api\v1\Controllers\TenantAdminLegacyCreateGuardController;
+use App\Http\Middleware\CheckTenantAccess;
+use Illuminate\Support\Facades\Route;
 
-require base_path('routes/api/packages/project_tenant_package_admin_api_v1/settings.php');
+Route::middleware(['auth:sanctum', CheckTenantAccess::class])
+    ->group(function () {
+        Route::post('/accounts', [TenantAdminLegacyCreateGuardController::class, 'rejectAccountsCreate'])
+            ->middleware('abilities:account-users:create');
+        Route::post('/account_profiles', [TenantAdminLegacyCreateGuardController::class, 'rejectAccountProfilesCreate'])
+            ->middleware('abilities:account-users:create');
+        Route::post('/account_onboardings', [AccountOnboardingsController::class, 'store'])
+            ->middleware('abilities:account-users:create');
+    });

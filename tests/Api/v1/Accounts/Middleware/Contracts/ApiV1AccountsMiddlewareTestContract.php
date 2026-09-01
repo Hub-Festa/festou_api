@@ -2,10 +2,12 @@
 
 namespace Tests\Api\v1\Accounts\Middleware\Contracts;
 
+use App\Models\Tenants\Account;
 use Illuminate\Testing\TestResponse;
 use Tests\Api\Traits\AccountAuthFunctions;
 use Tests\Api\Traits\AdminAuthFunctions;
 use Tests\Api\Traits\AdminRoleFunctions;
+use Tests\Api\Traits\TenantAdminMiddlewareFixtureSeeder;
 use Tests\Helpers\AccountLabels;
 use Tests\Helpers\TenantLabels;
 use Tests\Helpers\UserLabels;
@@ -13,7 +15,9 @@ use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
 {
-    use AdminRoleFunctions, AdminAuthFunctions, AccountAuthFunctions;
+    use AccountAuthFunctions, AdminAuthFunctions, AdminRoleFunctions, TenantAdminMiddlewareFixtureSeeder;
+
+    protected static array $seededFixtures = [];
 
     abstract protected TenantLabels $tenant_cross {
         get;
@@ -25,11 +29,26 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
 
     protected string $base_api_url {
         get{
-            return $this->base_api_account."roles";
+            return $this->base_api_account.'roles';
         }
     }
 
-    public function testLoginAllAdminUsers(): void {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $tenant = $this->resolveOrCreateTenant($this->tenant);
+
+        if (! array_key_exists(static::class, static::$seededFixtures)) {
+            $this->seedMiddlewareFixtures();
+            static::$seededFixtures[static::class] = true;
+        }
+
+        $tenant->makeCurrent();
+    }
+
+    public function testLoginAllAdminUsers(): void
+    {
         $response = $this->adminLogin($this->tenant->user_admin);
         $response->assertStatus(200);
 
@@ -43,7 +62,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $response->assertStatus(200);
     }
 
-    public function testLoginCrossAdmin(): void {
+    public function testLoginCrossAdmin(): void
+    {
         $response = $this->adminLogin($this->tenant_cross->user_admin);
         $response->assertStatus(200);
 
@@ -57,7 +77,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $response->assertStatus(200);
     }
 
-    public function testLoginAccountUsers():void {
+    public function testLoginAccountUsers(): void
+    {
         $response = $this->accountLogin($this->account->user_admin);
         $response->assertStatus(200);
 
@@ -68,7 +89,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $response->assertStatus(200);
     }
 
-    public function testLoginCrossAccountUsers():void {
+    public function testLoginCrossAccountUsers(): void
+    {
 
         $response = $this->accountLogin($this->account_cross->user_admin);
         $response->assertStatus(200);
@@ -80,7 +102,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $response->assertStatus(200);
     }
 
-    public function testLoginAccountFromCrossTenantInProperTenant():void {
+    public function testLoginAccountFromCrossTenantInProperTenant(): void
+    {
         $response = $this->accountLoginRaw(
             $this->tenant_cross,
             $this->tenant_cross->account_primary->user_admin);
@@ -97,7 +120,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $response->assertStatus(200);
     }
 
-    public function testLoginAccountFromCrossTenantInWrongTenant():void {
+    public function testLoginAccountFromCrossTenantInWrongTenant(): void
+    {
         $response = $this->accountLogin($this->tenant_cross->account_primary->user_admin);
         $response->assertStatus(403);
 
@@ -108,7 +132,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $response->assertStatus(403);
     }
 
-    public function testListAccountAdmin(): void {
+    public function testListAccountAdmin(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->account->user_admin
@@ -117,7 +142,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(200);
     }
 
-    public function testListAccountVisitor(): void {
+    public function testListAccountVisitor(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->account->user_visitor
@@ -126,7 +152,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(403);
     }
 
-    public function testListCrossAccountAdmin(): void {
+    public function testListCrossAccountAdmin(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->account_cross->user_admin
@@ -136,7 +163,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(401);
     }
 
-    public function testListCrossAccountVisitor(): void {
+    public function testListCrossAccountVisitor(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->account_cross->user_visitor
@@ -146,7 +174,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(401);
     }
 
-    public function testListTenantAdmin(): void {
+    public function testListTenantAdmin(): void
+    {
 
         $rolesList = $this->list(
             $this->getUserHeaders(
@@ -156,7 +185,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(200);
     }
 
-    public function testListTenantUserAdminNoPermissions(): void {
+    public function testListTenantUserAdminNoPermissions(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->tenant->user_users_manager
@@ -165,7 +195,8 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(403);
     }
 
-    public function testListTenantWithoutTenantAccess(): void {
+    public function testListTenantWithoutTenantAccess(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->tenant_cross->user_admin
@@ -174,19 +205,21 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         $rolesList->assertStatus(401);
     }
 
-    public function testListTenantWithCrossAccess(): void {
+    public function testListTenantWithCrossAccessIsUnauthorizedOnAccountScope(): void
+    {
         $rolesList = $this->list(
             $this->getUserHeaders(
                 $this->landlord->user_cross_tenant_admin
             )
         );
-        $rolesList->assertStatus(200);
+        $rolesList->assertStatus(401);
     }
 
-    protected function getUserHeaders(UserLabels $user): array {
+    protected function getUserHeaders(UserLabels $user): array
+    {
         return [
             'Authorization' => "Bearer $user->token",
-            'Content-Type' => 'application/json'
+            'Content-Type' => 'application/json',
         ];
     }
 
@@ -243,7 +276,7 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
             method: 'delete',
             uri: "$this->base_api_url/$roleId",
             data: [
-//                "role_id" => $this->main_role_id,
+                //                "role_id" => $this->main_role_id,
             ],
             headers: $this->getHeaders(),
         );
@@ -267,4 +300,20 @@ abstract class ApiV1AccountsMiddlewareTestContract extends TestCaseAccount
         );
     }
 
+    private function seedMiddlewareFixtures(): void
+    {
+        $tenant = $this->resolveOrCreateTenant($this->tenant);
+        $crossTenant = $this->resolveOrCreateTenant($this->tenant_cross);
+
+        $this->seedTenantUsers($tenant, $this->tenant);
+        $this->seedTenantUsers($crossTenant, $this->tenant_cross);
+
+        $this->seedAccountFixtures($tenant, $this->tenant->account_primary);
+        $this->seedAccountFixtures($tenant, $this->tenant->account_secondary);
+        $this->seedAccountFixtures($crossTenant, $this->tenant_cross->account_primary);
+        $this->seedAccountFixtures($crossTenant, $this->tenant_cross->account_secondary);
+
+        Account::current()?->forget();
+        $tenant->makeCurrent();
+    }
 }

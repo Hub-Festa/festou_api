@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Integration\DeepLinks;
 
-use Shared\Settings\Contracts\SettingsRegistryContract;
-use Shared\Settings\Support\SettingsNamespaceDefinition;
+use Belluga\Settings\Contracts\SettingsRegistryContract;
+use Belluga\Settings\Support\SettingsNamespaceDefinition;
 
 class AppLinksSettingsNamespaceRegistrar
 {
@@ -54,13 +54,21 @@ class AppLinksSettingsNamespaceRegistrar
                     'default' => null,
                     'order' => 20,
                 ],
+                'ios.paths' => [
+                    'type' => 'array',
+                    'nullable' => false,
+                    'label' => 'iOS Universal Link Paths',
+                    'label_i18n_key' => 'settings.app_links.ios.paths.label',
+                    'default' => ['/invite*', '/convites*'],
+                    'order' => 30,
+                ],
                 'ios.enabled' => [
                     'type' => 'boolean',
                     'nullable' => false,
                     'label' => 'iOS Published',
                     'label_i18n_key' => 'settings.app_links.ios.enabled.label',
                     'default' => false,
-                    'order' => 30,
+                    'order' => 34,
                 ],
                 'ios.store_url' => [
                     'type' => 'string',
@@ -68,7 +76,7 @@ class AppLinksSettingsNamespaceRegistrar
                     'label' => 'iOS Store URL',
                     'label_i18n_key' => 'settings.app_links.ios.store_url.label',
                     'default' => null,
-                    'order' => 31,
+                    'order' => 35,
                 ],
             ],
             order: 40,

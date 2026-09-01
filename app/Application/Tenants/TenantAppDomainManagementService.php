@@ -18,15 +18,12 @@ class TenantAppDomainManagementService
     public function list(Tenant $tenant): array
     {
         $identifiers = $tenant->typedAppDomainIdentifiers();
-
         if ($identifiers[Tenant::APP_PLATFORM_ANDROID] === null
             && $identifiers[Tenant::APP_PLATFORM_IOS] === null) {
             $legacy = $tenant->resolvedAppDomains();
-
             if (($legacy[0] ?? null) !== null) {
                 $identifiers[Tenant::APP_PLATFORM_ANDROID] = $legacy[0];
             }
-
             if (($legacy[1] ?? null) !== null) {
                 $identifiers[Tenant::APP_PLATFORM_IOS] = $legacy[1];
             }
@@ -42,7 +39,6 @@ class TenantAppDomainManagementService
     {
         $normalizedPlatform = $this->normalizePlatform($platform);
         $normalizedIdentifier = $this->normalizeIdentifier($identifier);
-
         if ($normalizedPlatform === null || $normalizedIdentifier === null) {
             throw ValidationException::withMessages([
                 'platform' => ['Invalid app platform or identifier.'],
@@ -71,27 +67,23 @@ class TenantAppDomainManagementService
                         'type' => $type,
                         'path' => $normalizedIdentifier,
                     ]);
-
-                    return;
-                }
-
-                $primary->path = $normalizedIdentifier;
-                if ($primary->trashed()) {
-                    $primary->restore();
                 } else {
-                    $primary->save();
-                }
-
-                foreach ($existing->slice(1) as $extra) {
-                    if (! $extra instanceof Domains) {
-                        continue;
+                    $primary->path = $normalizedIdentifier;
+                    if ($primary->trashed()) {
+                        $primary->restore();
+                    } else {
+                        $primary->save();
                     }
 
-                    if (! $extra->trashed()) {
-                        $extra->delete();
+                    foreach ($existing->slice(1) as $extra) {
+                        if (! $extra instanceof Domains) {
+                            continue;
+                        }
+                        if (! $extra->trashed()) {
+                            $extra->delete();
+                        }
+                        $extra->forceDelete();
                     }
-
-                    $extra->forceDelete();
                 }
             });
         } catch (BulkWriteException $exception) {
@@ -119,7 +111,6 @@ class TenantAppDomainManagementService
     public function remove(Tenant $tenant, string $platform): array
     {
         $normalizedPlatform = $this->normalizePlatform($platform);
-
         if ($normalizedPlatform === null) {
             throw ValidationException::withMessages([
                 'platform' => ['Invalid app platform.'],
@@ -130,7 +121,6 @@ class TenantAppDomainManagementService
         $existing = $tenant->domains()
             ->where('type', $type)
             ->get();
-
         if ($existing->isEmpty()) {
             throw ValidationException::withMessages([
                 'platform' => ['App identifier not found for this platform.'],
@@ -143,7 +133,6 @@ class TenantAppDomainManagementService
                     if (! $domain instanceof Domains) {
                         continue;
                     }
-
                     $domain->delete();
                 }
             });

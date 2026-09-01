@@ -7,8 +7,10 @@ namespace Tests\Unit\Application\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Tenants\TenantDomainManagementService;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -46,7 +48,7 @@ class TenantDomainManagementServiceTest extends TestCase
         $this->service = $this->app->make(TenantDomainManagementService::class);
     }
 
-    public function testCreatePersistsDomainAndUpdatesTenant(): void
+    public function test_create_persists_domain_and_updates_tenant(): void
     {
         $domain = $this->service->create($this->tenant, ['path' => 'tenantkappa.com']);
 
@@ -57,7 +59,16 @@ class TenantDomainManagementServiceTest extends TestCase
         ], 'landlord');
     }
 
-    public function testCreateRejectsDuplicateOnSameTenant(): void
+    public function test_create_dispatches_environment_snapshot_refresh_without_current_tenant_context(): void
+    {
+        Queue::fake();
+
+        $this->service->create($this->tenant, ['path' => 'tenantkappa-refresh.com']);
+
+        Queue::assertPushed(RebuildTenantEnvironmentSnapshotJob::class);
+    }
+
+    public function test_create_rejects_duplicate_on_same_tenant(): void
     {
         $this->service->create($this->tenant, ['path' => 'duplicatekappa.com']);
 
@@ -65,7 +76,7 @@ class TenantDomainManagementServiceTest extends TestCase
         $this->service->create($this->tenant->fresh(), ['path' => 'duplicatekappa.com']);
     }
 
-    public function testCreateRejectsDomainUsedByAnotherTenant(): void
+    public function test_create_rejects_domain_used_by_another_tenant(): void
     {
         $this->service->create($this->tenant, ['path' => 'sharedkappa.com']);
 
@@ -82,7 +93,7 @@ class TenantDomainManagementServiceTest extends TestCase
         $this->service->create($other, ['path' => 'sharedkappa.com']);
     }
 
-    public function testDeleteSoftDeletesDomainAndUpdatesTenant(): void
+    public function test_delete_soft_deletes_domain_and_updates_tenant(): void
     {
         $domain = $this->service->create($this->tenant, ['path' => 'removekappa.com']);
 
@@ -94,7 +105,7 @@ class TenantDomainManagementServiceTest extends TestCase
         ], 'landlord');
     }
 
-    public function testRestoreReaddsDomain(): void
+    public function test_restore_readds_domain(): void
     {
         $domain = $this->service->create($this->tenant, ['path' => 'restorekappa.com']);
         $this->service->delete($this->tenant, (string) $domain->_id);
@@ -105,7 +116,7 @@ class TenantDomainManagementServiceTest extends TestCase
         $this->assertFalse($restored->trashed());
     }
 
-    public function testForceDeleteRemovesDomain(): void
+    public function test_force_delete_removes_domain(): void
     {
         $domain = $this->service->create($this->tenant, ['path' => 'forcekappa.com']);
         $this->service->delete($this->tenant, (string) $domain->_id);

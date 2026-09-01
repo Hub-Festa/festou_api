@@ -1,0 +1,43 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Api\v1\Requests;
+
+use App\Application\AccountProfiles\AccountProfileTypeCapabilityCatalog;
+use App\Support\Validation\InputConstraints;
+use Illuminate\Foundation\Http\FormRequest;
+
+class AccountProfileTypeUpdateRequest extends FormRequest
+{
+    /**
+     * @return array<string, mixed>
+     */
+    public function rules(): array
+    {
+        return [
+            'type' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX, 'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/'],
+            'label' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'labels' => ['sometimes', 'array'],
+            'labels.singular' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'labels.plural' => ['sometimes', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'allowed_taxonomies' => ['sometimes', 'array', 'max:'.InputConstraints::DISCOVERY_FILTER_ALLOWED_TAXONOMIES_MAX],
+            'allowed_taxonomies.*' => ['string', 'max:'.InputConstraints::NAME_MAX],
+            'visual' => ['sometimes', 'nullable', 'array'],
+            'visual.mode' => ['required_with:visual', 'string', 'in:icon,image'],
+            'visual.icon' => ['required_if:visual.mode,icon', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'visual.color' => ['required_if:visual.mode,icon', 'string', 'regex:/^#[A-Fa-f0-9]{6}$/'],
+            'visual.icon_color' => ['required_if:visual.mode,icon', 'string', 'regex:/^#[A-Fa-f0-9]{6}$/'],
+            'visual.image_source' => ['required_if:visual.mode,image', 'string', 'in:avatar,cover,type_asset'],
+            'poi_visual' => ['sometimes', 'nullable', 'array'],
+            'poi_visual.mode' => ['required_with:poi_visual', 'string', 'in:icon,image'],
+            'poi_visual.icon' => ['required_if:poi_visual.mode,icon', 'string', 'max:'.InputConstraints::NAME_MAX],
+            'poi_visual.color' => ['required_if:poi_visual.mode,icon', 'string', 'regex:/^#[A-Fa-f0-9]{6}$/'],
+            'poi_visual.icon_color' => ['required_if:poi_visual.mode,icon', 'string', 'regex:/^#[A-Fa-f0-9]{6}$/'],
+            'poi_visual.image_source' => ['required_if:poi_visual.mode,image', 'string', 'in:avatar,cover,type_asset'],
+            'type_asset' => ['sometimes', 'nullable', 'image'],
+            'remove_type_asset' => ['sometimes', 'boolean'],
+            ...app(AccountProfileTypeCapabilityCatalog::class)->validationRules(),
+        ];
+    }
+}

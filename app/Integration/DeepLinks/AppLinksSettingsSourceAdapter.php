@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Integration\DeepLinks;
 
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\TenantSettings;
+use Belluga\DeepLinks\Contracts\AppLinksSettingsSourceContract;
+use Belluga\Settings\Models\Landlord\LandlordSettings;
 use Illuminate\Support\Arr;
-use Shared\DeepLinks\Contracts\AppLinksSettingsSourceContract;
-use Shared\Settings\Models\Landlord\LandlordSettings;
-use Shared\Settings\Models\Tenants\TenantSettings;
 
 class AppLinksSettingsSourceAdapter implements AppLinksSettingsSourceContract
 {
@@ -16,9 +17,12 @@ class AppLinksSettingsSourceAdapter implements AppLinksSettingsSourceContract
      */
     public function currentAppLinksSettings(): array
     {
-        $tenantSettings = TenantSettings::current();
-        if ($tenantSettings !== null) {
-            return $this->normalizeArray($tenantSettings->getAttribute('app_links'));
+        $currentTenant = Tenant::current();
+        if ($currentTenant !== null) {
+            $tenantSettings = TenantSettings::current();
+            if ($tenantSettings !== null) {
+                return $this->normalizeArray($tenantSettings->getAttribute('app_links'));
+            }
         }
 
         $landlordSettings = LandlordSettings::current();
@@ -37,21 +41,18 @@ class AppLinksSettingsSourceAdapter implements AppLinksSettingsSourceContract
         if (is_array($value)) {
             return Arr::undot($value);
         }
-
         if ($value instanceof \MongoDB\Model\BSONDocument || $value instanceof \MongoDB\Model\BSONArray) {
             /** @var array<string, mixed> $copy */
             $copy = $value->getArrayCopy();
 
             return Arr::undot($copy);
         }
-
         if ($value instanceof \Traversable) {
             /** @var array<string, mixed> $copy */
             $copy = iterator_to_array($value);
 
             return Arr::undot($copy);
         }
-
         if (is_object($value)) {
             /** @var array<string, mixed> $copy */
             $copy = (array) $value;

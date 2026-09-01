@@ -10,7 +10,6 @@ use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
-use App\Models\Tenants\AccountUser;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
 use Tests\Traits\SeedsTenantAccounts;
@@ -47,12 +46,13 @@ class AccountManagementServiceTest extends TestCase
         $this->userService = $this->app->make(AccountUserService::class);
     }
 
-    public function testCreateAccountWithAdminRole(): void
+    public function test_create_account_with_admin_role(): void
     {
         $name = fake()->unique()->company();
 
         $result = $this->service->create([
             'name' => $name,
+            'ownership_state' => 'unmanaged',
             'document' => [
                 'type' => 'cpf',
                 'number' => fake()->unique()->numerify('###################'),
@@ -67,10 +67,11 @@ class AccountManagementServiceTest extends TestCase
         $this->service->forceDelete($result['account']);
     }
 
-    public function testDeleteAccountSoftDeletesRoleTemplates(): void
+    public function test_delete_account_soft_deletes_role_templates(): void
     {
         $account = $this->service->create([
             'name' => fake()->unique()->company(),
+            'ownership_state' => 'unmanaged',
             'document' => ['type' => 'cpf', 'number' => fake()->unique()->numerify('###################')],
         ])['account'];
 
@@ -81,7 +82,7 @@ class AccountManagementServiceTest extends TestCase
         $this->service->forceDelete($account);
     }
 
-    public function testAttachAndDetachUser(): void
+    public function test_attach_and_detach_user(): void
     {
         $user = $this->userService->create($this->account, [
             'name' => 'Member',

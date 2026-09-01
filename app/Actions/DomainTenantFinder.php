@@ -6,132 +6,138 @@ namespace App\Actions;
 
 use App\Application\Tenants\TenantAppDomainResolverService;
 use App\Application\Tenants\TenantDomainResolverService;
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use Illuminate\Http\Request;
 use Spatie\Multitenancy\Contracts\IsTenant;
 use Spatie\Multitenancy\TenantFinder\TenantFinder;
 
 class DomainTenantFinder extends TenantFinder
 {
-    private array $local_environment_alternatives = ['localhost', '127.0.0.1', 'nginx'];
+    private ?Request $activeRequest = null;
 
     public function __construct(
         private readonly TenantDomainResolverService $domainResolver,
         private readonly TenantAppDomainResolverService $appDomainResolver,
-    )
-    {
-    }
+        private readonly TenantRequestLifecycleTrace $lifecycleTrace,
+    ) {}
 
     public function findForRequest(Request $request): ?IsTenant
     {
-        if ($this->isRequestFromSubdomain()) {
-            $tenant = $this->findTenantBySubdomain();
+        $this->activeRequest = $request;
 
-            if ($tenant !== null) {
-                return $tenant;
+        try {
+            if ($this->isRequestFromSubdomain()) {
+                $this->lifecycleTrace->record('finder.branch.subdomain');
+
+                $tenant = $this->findTenantBySubdomain();
+                if ($tenant !== null) {
+                    return $tenant;
+                }
             }
-        }
 
-        if ($this->isRequestFromLandlordHost()) {
-            $tenant = $this->findTenantByAppDomain();
+            if ($this->isRequestFromApp() && $this->isRequestToLandlordHost()) {
+                $this->lifecycleTrace->record('finder.branch.app_domain');
 
-            if ($tenant !== null) {
-                return $tenant;
+                return $this->findTenantByAppDomain();
             }
-        }
 
-        return $this->findTenantByWebDomain();
+            $this->lifecycleTrace->record('finder.branch.web_domain');
+
+            return $this->findTenantByWebDomain();
+        } finally {
+            $this->activeRequest = null;
+        }
     }
 
     protected function findTenantByAppDomain(): ?IsTenant
     {
         $appDomain = $this->resolveAppDomainFromRequest();
+
+        $this->lifecycleTrace->record('resolver.app_domain.started', [
+            'app_domain_hash' => $this->lifecycleTrace->redactIdentifier($appDomain),
+        ]);
+
         if ($appDomain === null) {
+            $this->lifecycleTrace->record('resolver.app_domain.miss');
+
             return null;
         }
 
-        return $this->appDomainResolver->findTenantByIdentifier($appDomain);
+        $tenant = $this->appDomainResolver->findTenantByIdentifier($appDomain);
+
+        $this->lifecycleTrace->record(
+            $tenant !== null ? 'resolver.app_domain.resolved' : 'resolver.app_domain.miss',
+            [
+                'tenant_target' => $this->lifecycleTrace->tenantFingerprint($tenant),
+            ],
+        );
+
+        return $tenant;
     }
 
     protected function findTenantByWebDomain(): ?IsTenant
     {
-        $domain = request()->getHost();
+        $domain = $this->request()->getHost();
 
         return $this->domainResolver->findTenantByDomain($domain);
     }
 
     protected function findTenantBySubdomain(): ?IsTenant
     {
-        $subdomain = $this->resolveRequestSubdomain();
-        if ($subdomain === null) {
-            return null;
-        }
+        $parts_request = explode('.', $this->request()->getHost());
+        $subdomain = $parts_request[0];
 
-        return app(IsTenant::class)::where('subdomain', $subdomain)->first();
+        $this->lifecycleTrace->record('resolver.subdomain.started', [
+            'subdomain_hash' => $this->lifecycleTrace->redactIdentifier($subdomain),
+        ]);
+
+        $tenant = app(IsTenant::class)::where('subdomain', $subdomain)->first();
+
+        $this->lifecycleTrace->record(
+            $tenant !== null ? 'resolver.subdomain.resolved' : 'resolver.subdomain.miss',
+            [
+                'tenant_target' => $this->lifecycleTrace->tenantFingerprint($tenant),
+            ],
+        );
+
+        return $tenant;
     }
 
-    protected function isRequestFromSubdomain(): bool {
-        return $this->resolveRequestSubdomain() !== null;
-    }
-
-    protected function isRequestFromLandlordHost(): bool
+    protected function isRequestFromApp(): bool
     {
-        $host = $this->normalizedHost(request()->getHost());
-        $landlordHost = $this->landlordHost();
+        return $this->resolveAppDomainFromRequest() !== null;
+    }
 
-        if ($host === null || $landlordHost === null) {
+    protected function isRequestFromSubdomain(): bool
+    {
+        $host = strtolower(trim($this->request()->getHost()));
+        if ($host === '' || filter_var($host, FILTER_VALIDATE_IP) !== false) {
             return false;
         }
 
-        return $host === $landlordHost;
+        $configuredHost = $this->configuredHost();
+        if ($configuredHost === null || $host === $configuredHost) {
+            return false;
+        }
+
+        return str_ends_with($host, '.'.$configuredHost);
     }
 
-    private function landlordHost(): ?string
+    private function configuredHost(): ?string
     {
-        $host = parse_url((string) config('app.url'), PHP_URL_HOST);
-
-        if (! is_string($host) || trim($host) === '') {
-            $host = trim(str_replace(['https://', 'http://'], '', (string) config('app.url')), '/');
+        $configuredHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (! is_string($configuredHost) || trim($configuredHost) === '') {
+            $configuredHost = trim(str_replace(['https://', 'http://'], '', (string) config('app.url')), '/');
         }
 
-        return $this->normalizedHost($host);
-    }
+        $configuredHost = strtolower(trim($configuredHost));
 
-    private function normalizedHost(?string $host): ?string
-    {
-        if (! is_string($host)) {
-            return null;
-        }
-
-        $normalized = trim(strtolower($host));
-
-        return $normalized === '' ? null : $normalized;
-    }
-
-    private function resolveRequestSubdomain(): ?string
-    {
-        $host = $this->normalizedHost(request()->getHost());
-        $landlordHost = $this->landlordHost();
-
-        if ($host === null || $landlordHost === null || $host === $landlordHost) {
-            return null;
-        }
-
-        $suffix = '.' . $landlordHost;
-        if (! str_ends_with($host, $suffix)) {
-            return null;
-        }
-
-        $subdomain = substr($host, 0, -strlen($suffix));
-        if ($subdomain === '' || str_contains($subdomain, '.')) {
-            return null;
-        }
-
-        return $subdomain;
+        return $configuredHost === '' ? null : $configuredHost;
     }
 
     private function resolveAppDomainFromRequest(): ?string
     {
-        $request = request();
+        $request = $this->request();
 
         $headerDomain = $request->header('X-App-Domain');
         if (is_string($headerDomain) && trim($headerDomain) !== '') {
@@ -149,5 +155,20 @@ class DomainTenantFinder extends TenantFinder
         }
 
         return null;
+    }
+
+    private function isRequestToLandlordHost(): bool
+    {
+        $configuredHost = parse_url((string) config('app.url'), PHP_URL_HOST);
+        if (! is_string($configuredHost) || $configuredHost === '') {
+            $configuredHost = (string) config('app.url');
+        }
+
+        return strcasecmp($this->request()->getHost(), trim($configuredHost)) === 0;
+    }
+
+    private function request(): Request
+    {
+        return $this->activeRequest ?? request();
     }
 }

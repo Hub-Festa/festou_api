@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Application\Identity;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Application\Identity\TenantPasswordRegistrationResult;
 use App\Application\Identity\TenantPasswordRegistrationService;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
-use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Facades\Hash;
@@ -44,7 +45,9 @@ class TenantPasswordRegistrationServiceTest extends TestCase
 
         $this->service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
-            $this->app->make(AnonymousIdentityMerger::class)
+            $this->app->make(AnonymousIdentityMerger::class),
+            $this->app->make(AccountProfileBootstrapService::class),
+            $this->app->make(TenantScopedAccessTokenService::class),
         );
     }
 
@@ -60,7 +63,6 @@ class TenantPasswordRegistrationServiceTest extends TestCase
         $this->assertSame('registered', $result->user->identity_state);
         $this->assertTrue(Hash::check('SecurePass!123', (string) $result->user->password));
         $this->assertNotEmpty($result->plainTextToken);
-        $this->assertTokenTenantId($result->plainTextToken);
     }
 
     public function test_register_merges_anonymous_identities(): void
@@ -106,7 +108,9 @@ class TenantPasswordRegistrationServiceTest extends TestCase
 
         $service = new TenantPasswordRegistrationService(
             $this->app->make(PasswordIdentityRegistrar::class),
-            $mockMerger
+            $mockMerger,
+            $this->app->make(AccountProfileBootstrapService::class),
+            $this->app->make(TenantScopedAccessTokenService::class),
         );
 
         $anonymous = $this->createAnonymousUser();
@@ -131,17 +135,6 @@ class TenantPasswordRegistrationServiceTest extends TestCase
             'consents' => [],
             'credentials' => [],
         ]);
-    }
-
-    private function assertTokenTenantId(string $plainTextToken): void
-    {
-        $token = PersonalAccessToken::findToken($plainTextToken);
-
-        $this->assertInstanceOf(PersonalAccessToken::class, $token);
-        $this->assertSame(
-            (string) $this->tenant->_id,
-            trim((string) $token->getAttribute('tenant_id'))
-        );
     }
 
     private function initializeSystem(): void

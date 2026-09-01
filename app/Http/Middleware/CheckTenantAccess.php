@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Application\Tenants\TenantRequestLifecycleTrace;
 use App\Models\Landlord\LandlordUser;
 use App\Models\Tenants\AccountUser;
 use Closure;
@@ -27,13 +28,23 @@ class CheckTenantAccess
     public function handle($request, Closure $next)
     {
         $principal = $this->user;
+        $this->recordLifecycleTrace('middleware.tenant_access.enter', [
+            'principal_kind' => $this->principalKind($principal),
+        ]);
 
         if (! $principal) {
             throw new AuthenticationException;
         }
 
-        if ($principal instanceof AccountUser) {
+        // Tenant-scoped users are persisted only inside the active tenant DB.
+        // If Sanctum resolved an AccountUser, tenancy resolution already
+        // guarantees principal -> tenant affinity.
+        if ($this->isTenantScopedPrincipal($principal)) {
             $this->assertAccountUserTokenMatchesCurrentTenant($principal);
+
+            $this->recordLifecycleTrace('middleware.tenant_access.passed', [
+                'principal_kind' => $this->principalKind($principal),
+            ]);
 
             return $next($request);
         }
@@ -49,7 +60,16 @@ class CheckTenantAccess
             throw new AuthorizationException;
         }
 
+        $this->recordLifecycleTrace('middleware.tenant_access.passed', [
+            'principal_kind' => $this->principalKind($principal),
+        ]);
+
         return $next($request);
+    }
+
+    private function isTenantScopedPrincipal(mixed $principal): bool
+    {
+        return $principal instanceof AccountUser;
     }
 
     private function assertAccountUserTokenMatchesCurrentTenant(AccountUser $user): void
@@ -68,5 +88,20 @@ class CheckTenantAccess
         if ($currentTenantId === '' || ! hash_equals($tokenTenantId, $currentTenantId)) {
             throw new AuthorizationException('Account token is not valid for the current tenant.');
         }
+    }
+
+    private function recordLifecycleTrace(string $stage, array $context = []): void
+    {
+        app(TenantRequestLifecycleTrace::class)->record($stage, $context);
+    }
+
+    private function principalKind(mixed $principal): string
+    {
+        return match (true) {
+            $principal instanceof AccountUser => 'tenant_account_user',
+            $principal instanceof LandlordUser => 'landlord_user',
+            $principal === null => 'anonymous',
+            default => 'unknown',
+        };
     }
 }

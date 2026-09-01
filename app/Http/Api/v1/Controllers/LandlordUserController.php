@@ -7,9 +7,10 @@ namespace App\Http\Api\v1\Controllers;
 use App\Application\LandlordUsers\LandlordUserManagementService;
 use App\Application\LandlordUsers\LandlordUserQueryService;
 use App\Application\LandlordUsers\TenantUserRoleManager;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Api\v1\Requests\LandlordUserCreateRequest;
-use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Api\v1\Requests\TenantLandlordUserAttachRequest;
+use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
@@ -23,9 +24,9 @@ class LandlordUserController extends Controller
     public function __construct(
         private readonly LandlordUserManagementService $landlordUserService,
         private readonly LandlordUserQueryService $landlordUserQueryService,
-        private readonly TenantUserRoleManager $tenantUserRoleManager
-    ) {
-    }
+        private readonly TenantUserRoleManager $tenantUserRoleManager,
+        private readonly TelemetryEmitter $telemetry
+    ) {}
 
     /**
      * Lista todos os usuários do landlord
@@ -64,7 +65,7 @@ class LandlordUserController extends Controller
 
         return response()->json([
             'message' => 'Usuário do landlord criado com sucesso',
-            'data' => $user
+            'data' => $user,
         ], 201);
     }
 
@@ -79,21 +80,23 @@ class LandlordUserController extends Controller
 
         return response()->json([
             'message' => 'Usuário do landlord atualizado com sucesso',
-            'data' => $updated
+            'data' => $updated,
         ]);
     }
 
-    public function restore($user_id): JsonResponse {
+    public function restore($user_id): JsonResponse
+    {
         $user = $this->landlordUserService->restore($user_id);
 
-        return response()->json(["data" => $user]);
+        return response()->json(['data' => $user]);
     }
 
-    public function forceDestroy($user_id): JsonResponse {
-        try{
+    public function forceDestroy($user_id): JsonResponse
+    {
+        try {
             $this->landlordUserService->forceDelete($user_id);
-        }catch (\Throwable $e){
-            return response()->json(["errors" => ["relationships" => ["Error deleting relationships."]]]);
+        } catch (\Throwable $e) {
+            return response()->json(['errors' => ['relationships' => ['Error deleting relationships.']]]);
         }
 
         return response()->json();
@@ -113,9 +116,9 @@ class LandlordUserController extends Controller
         } catch (ValidationException $e) {
             return response()->json(
                 [
-                    "errors" => [
-                        "user" => ['Não é possível excluir o próprio usuário']
-                    ]
+                    'errors' => [
+                        'user' => ['Não é possível excluir o próprio usuário'],
+                    ],
                 ],
                 403
             );
@@ -124,24 +127,40 @@ class LandlordUserController extends Controller
         return response()->json(['message' => 'Usuário do landlord removido com sucesso']);
     }
 
-
-
-    public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse {
+    public function tenantUserManage(TenantLandlordUserAttachRequest $request): JsonResponse
+    {
 
         $tenant = Tenant::resolve();
         $data = $request->validated();
+        $action = null;
 
         try {
             $method = strtolower($request->method());
             if ($method === 'post') {
                 $this->tenantUserRoleManager->assign($data['user_id'], $data['role_id'], $tenant);
+                $action = 'create';
             } elseif ($method === 'delete') {
                 $this->tenantUserRoleManager->revoke($data['user_id'], $data['role_id'], $tenant);
+                $action = 'delete';
             } else {
-                abort(422, "Not found an action for this method.");
+                abort(422, 'Not found an action for this method.');
             }
         } catch (\Throwable $e) {
-            abort(422, "An error occurred while trying to manage the users for this tenant. Please try again later.");
+            abort(422, 'An error occurred while trying to manage the users for this tenant. Please try again later.');
+        }
+
+        $user = $request->user();
+        if ($user && $action) {
+            $this->telemetry->emit(
+                event: 'tenant_user_managed',
+                userId: (string) $user->_id,
+                properties: [
+                    'target_user_id' => $data['user_id'],
+                    'role_id' => $data['role_id'],
+                    'action' => $action,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
         }
 
         return response()->json();

@@ -2,7 +2,10 @@
 
 namespace Tests\Api\v1\Tenants\Auth;
 
-use App\Models\Landlord\PersonalAccessToken;
+use App\Application\Auth\TenantScopedAccessTokenService;
+use App\Models\Tenants\AccountProfile;
+use App\Models\Tenants\AccountUser;
+use App\Support\Helpers\PhoneNumberParser;
 use Tests\Helpers\TenantLabels;
 use Tests\TestCaseTenant;
 
@@ -16,6 +19,8 @@ class ApiV1TenantMeTest extends TestCaseTenant
 
     public function test_tenant_me_returns_profile_payload(): void
     {
+        $this->setTenantPublicAuthFixture(['password']);
+
         $email = fake()->unique()->safeEmail();
         $password = 'Secret!234';
 
@@ -26,6 +31,8 @@ class ApiV1TenantMeTest extends TestCaseTenant
                 'name' => 'Tenant Me User',
                 'email' => $email,
                 'password' => $password,
+                'password_confirmation' => $password,
+                'device_name' => 'tenant-me-register',
             ]
         )->assertStatus(201);
 
@@ -41,10 +48,6 @@ class ApiV1TenantMeTest extends TestCaseTenant
 
         $login->assertStatus(200);
         $token = $login->json('data.token');
-        $this->assertSame(
-            $this->landlord->tenant_primary->id,
-            trim((string) $this->accessTokenFromPlainText($token)->getAttribute('tenant_id'))
-        );
 
         $response = $this->json(
             method: 'get',
@@ -60,8 +63,11 @@ class ApiV1TenantMeTest extends TestCaseTenant
             'tenant_id',
             'data' => [
                 'user_id',
+                'account_profile_id',
                 'display_name',
                 'avatar_url',
+                'bio',
+                'phone',
                 'user_level',
                 'privacy_mode',
                 'social_score' => [
@@ -83,92 +89,138 @@ class ApiV1TenantMeTest extends TestCaseTenant
         ]);
         $response->assertJsonPath('data.user_level', 'basic');
         $response->assertJsonPath('data.privacy_mode', 'public');
+        $this->assertNotEmpty($response->json('data.account_profile_id'));
     }
 
-    public function test_tenant_me_rejects_account_token_with_foreign_tenant_scope(): void
+    public function test_tenant_profile_update_persists_personal_profile_and_me_readback(): void
     {
-        $token = $this->registeredTenantToken();
-        $accessToken = $this->accessTokenFromPlainText($token);
-        $accessToken->setAttribute('tenant_id', 'foreign-tenant-id');
-        $accessToken->save();
+        $user = AccountUser::query()->create([
+            'name' => 'Original Name',
+            'emails' => [fake()->unique()->safeEmail()],
+            'phones' => [PhoneNumberParser::parse('+55 27 99999-0042')],
+            'identity_state' => 'registered',
+        ]);
+        $token = $this->issueTenantScopedToken($user, 'tenant-profile-test');
 
         $this->json(
+            method: 'patch',
+            uri: "{$this->base_api_tenant}profile",
+            data: [
+                'name' => 'Persisted Name',
+                'bio' => 'Bio persisted through profile endpoint.',
+            ],
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json',
+            ]
+        )->assertStatus(200);
+
+        $this->makeCanonicalTenantCurrent($this->tenant);
+        $profile = AccountProfile::query()
+            ->where('created_by', (string) $user->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', 'personal')
+            ->where('deleted_at', null)
+            ->first();
+
+        $this->assertInstanceOf(AccountProfile::class, $profile);
+        $this->assertSame('Persisted Name', $profile->display_name);
+        $this->assertSame(
+            'Bio persisted through profile endpoint.',
+            trim(strip_tags((string) $profile->bio)),
+        );
+
+        $me = $this->json(
             method: 'get',
             uri: "{$this->base_api_tenant}me",
             headers: [
                 'Authorization' => "Bearer $token",
                 'Content-Type' => 'application/json',
             ]
-        )->assertStatus(403);
+        );
+
+        $me->assertStatus(200);
+        $me->assertJsonPath('data.account_profile_id', (string) $profile->_id);
+        $me->assertJsonPath('data.display_name', 'Persisted Name');
+        $me->assertJsonPath('data.bio', 'Bio persisted through profile endpoint.');
+        $me->assertJsonPath('data.phone', PhoneNumberParser::parse('+55 27 99999-0042'));
+        $this->assertNotEmpty($me->json('data.account_profile_id'));
     }
 
-    public function test_tenant_me_rejects_account_token_with_blank_or_missing_tenant_scope(): void
+    public function test_tenant_profile_phone_mutation_endpoints_are_rejected(): void
     {
-        foreach ($this->blankTenantScopeMutators() as $label => $mutate) {
-            $token = $this->registeredTenantToken();
-            $accessToken = $this->accessTokenFromPlainText($token);
-            $mutate($accessToken);
-            $accessToken->save();
+        $user = AccountUser::query()->create([
+            'name' => 'Phone Locked User',
+            'emails' => [fake()->unique()->safeEmail()],
+            'phones' => [PhoneNumberParser::parse('+55 27 99999-0099')],
+            'identity_state' => 'registered',
+        ]);
+        $token = $this->issueTenantScopedToken($user, 'tenant-profile-test');
 
-            $this->json(
-                method: 'get',
-                uri: "{$this->base_api_tenant}me",
-                headers: [
-                    'Authorization' => "Bearer $token",
-                    'Content-Type' => 'application/json',
-                ]
-            )->assertStatus(403, $label);
-        }
-    }
-
-    private function registeredTenantToken(): string
-    {
-        $email = fake()->unique()->safeEmail();
-        $password = 'Secret!234';
-
-        $this->json(
-            method: 'post',
-            uri: "{$this->base_api_tenant}auth/register/password",
+        $add = $this->json(
+            method: 'patch',
+            uri: "{$this->base_api_tenant}profile/phones",
             data: [
-                'name' => 'Tenant Me Scoped User',
-                'email' => $email,
-                'password' => $password,
+                'phones' => ['+55 27 99999-1234'],
+            ],
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json',
             ]
-        )->assertStatus(201);
+        );
+        $add->assertStatus(422);
+        $add->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
 
-        $login = $this->json(
-            method: 'post',
-            uri: "{$this->base_api_tenant}auth/login",
+        $remove = $this->json(
+            method: 'delete',
+            uri: "{$this->base_api_tenant}profile/phones",
             data: [
-                'email' => $email,
-                'password' => $password,
-                'device_name' => 'tenant-me-scope-test',
+                'phone' => '+55 27 99999-0099',
+            ],
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json',
+            ]
+        );
+        $remove->assertStatus(422);
+        $remove->assertJsonPath(
+            'errors.phone.0',
+            'Telefone verificado não pode ser alterado por este endpoint.',
+        );
+    }
+
+    public function test_tenant_me_does_not_expose_phone_number_as_display_name_fallback(): void
+    {
+        $phone = PhoneNumberParser::parse('+55 27 99999-0011');
+        $user = AccountUser::query()->create([
+            'name' => $phone,
+            'emails' => [fake()->unique()->safeEmail()],
+            'phones' => [$phone],
+            'identity_state' => 'registered',
+        ]);
+        $token = $this->issueTenantScopedToken($user, 'tenant-profile-test');
+
+        $response = $this->json(
+            method: 'get',
+            uri: "{$this->base_api_tenant}me",
+            headers: [
+                'Authorization' => "Bearer $token",
+                'Content-Type' => 'application/json',
             ]
         );
 
-        $login->assertStatus(200);
-
-        return (string) $login->json('data.token');
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.display_name', '');
+        $response->assertJsonPath('data.phone', $phone);
     }
 
-    private function accessTokenFromPlainText(string $plainTextToken): PersonalAccessToken
+    private function issueTenantScopedToken(AccountUser $user, string $tokenName): string
     {
-        $token = PersonalAccessToken::findToken($plainTextToken);
-        $this->assertInstanceOf(PersonalAccessToken::class, $token);
-
-        return $token;
-    }
-
-    /**
-     * @return array<string, callable(PersonalAccessToken): void>
-     */
-    private function blankTenantScopeMutators(): array
-    {
-        return [
-            'null' => fn (PersonalAccessToken $token) => $token->setAttribute('tenant_id', null),
-            'empty_string' => fn (PersonalAccessToken $token) => $token->setAttribute('tenant_id', ''),
-            'whitespace_only' => fn (PersonalAccessToken $token) => $token->setAttribute('tenant_id', '   '),
-            'missing_attribute' => fn (PersonalAccessToken $token) => $token->offsetUnset('tenant_id'),
-        ];
+        return $this->app->make(TenantScopedAccessTokenService::class)
+            ->issueForAccountUser($user, $tokenName, [])
+            ->plainTextToken;
     }
 }

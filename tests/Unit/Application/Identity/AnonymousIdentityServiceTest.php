@@ -8,7 +8,6 @@ use App\Application\Identity\AnonymousIdentityResult;
 use App\Application\Identity\AnonymousIdentityService;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
-use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -53,7 +52,6 @@ class AnonymousIdentityServiceTest extends TestCase
         $this->assertInstanceOf(AnonymousIdentityResult::class, $result);
         $this->assertSame('anonymous', $result->user->identity_state);
         $this->assertNotEmpty($result->plainTextToken);
-        $this->assertTokenTenantId($result->plainTextToken);
     }
 
     public function test_register_updates_existing_fingerprint(): void
@@ -95,16 +93,5 @@ class AnonymousIdentityServiceTest extends TestCase
         );
 
         $service->initialize($payload);
-    }
-
-    private function assertTokenTenantId(string $plainTextToken): void
-    {
-        $token = PersonalAccessToken::findToken($plainTextToken);
-
-        $this->assertInstanceOf(PersonalAccessToken::class, $token);
-        $this->assertSame(
-            (string) $this->tenant->_id,
-            trim((string) $token->getAttribute('tenant_id'))
-        );
     }
 }

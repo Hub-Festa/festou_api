@@ -4,15 +4,18 @@ declare(strict_types=1);
 
 namespace App\Application\Identity;
 
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
-use Laravel\Sanctum\NewAccessToken;
-use RuntimeException;
 
 class AnonymousIdentityService
 {
+    public function __construct(
+        private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
+    ) {}
+
     /**
      * @param array{
      *     device_name: string,
@@ -26,7 +29,6 @@ class AnonymousIdentityService
      */
     public function register(Tenant $tenant, array $payload): AnonymousIdentityResult
     {
-        $tenantId = $this->tenantId($tenant);
         $fingerprint = $payload['fingerprint'];
         $hash = $fingerprint['hash'];
         $now = Carbon::now();
@@ -55,8 +57,12 @@ class AnonymousIdentityService
             $abilities = array_values(array_filter($abilities, static fn (string $ability): bool => $ability !== '*'));
         }
 
-        $token = $user->createToken('anonymous:'.$payload['device_name'], $abilities);
-        $this->stampTenantId($token, $tenantId);
+        $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
+            $user,
+            'anonymous:'.$payload['device_name'],
+            $abilities,
+            (string) $tenant->_id
+        );
         $plainToken = $token->plainTextToken;
 
         $expiresAt = null;
@@ -74,23 +80,6 @@ class AnonymousIdentityService
             $abilities,
             $expiresAt
         );
-    }
-
-    private function tenantId(Tenant $tenant): string
-    {
-        $tenantId = trim((string) $tenant->getAttribute('_id'));
-
-        if ($tenantId === '') {
-            throw new RuntimeException('Cannot issue anonymous tenant token without tenant id.');
-        }
-
-        return $tenantId;
-    }
-
-    private function stampTenantId(NewAccessToken $newToken, string $tenantId): void
-    {
-        $newToken->accessToken->setAttribute('tenant_id', $tenantId);
-        $newToken->accessToken->save();
     }
 
     /**

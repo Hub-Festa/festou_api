@@ -4,16 +4,23 @@ declare(strict_types=1);
 
 namespace App\Application\Environment;
 
+use App\Application\Tenants\TenantRequestLifecycleTrace;
+use App\Jobs\Environment\RebuildTenantEnvironmentSnapshotJob;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\TenantEnvironmentSnapshot;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Log;
-use Shared\PushHandler\Models\Tenants\TenantPushSettings;
 
 class TenantEnvironmentSnapshotService
 {
-    public const SCHEMA_VERSION = 1;
+    public const SCHEMA_VERSION = 3;
+
+    /**
+     * @var array<string, bool>
+     */
+    private array $dispatchMemo = [];
 
     public function __construct(
         private readonly TenantEnvironmentPayloadFactory $payloadFactory,
@@ -27,33 +34,39 @@ class TenantEnvironmentSnapshotService
         ?string $requestRoot,
         ?string $requestHost,
     ): array {
-        $sourceVersion = $this->sourceVersion($tenant);
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.lookup.start');
         $snapshotDocument = $this->currentSnapshotDocument();
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.lookup.loaded', [
+            'snapshot_present' => is_array($snapshotDocument),
+            'snapshot_schema_version' => $this->snapshotSchemaVersion($snapshotDocument),
+        ]);
 
-        if (! $this->snapshotIsCurrent($tenant, $snapshotDocument, $sourceVersion)) {
-            $reason = $this->repairReason($snapshotDocument, $sourceVersion);
+        if ($this->needsRepairDocument($snapshotDocument)) {
+            $reason = $snapshotDocument === null ? 'missing_snapshot' : 'version_drift';
+            Log::warning('tenant_environment_snapshot_repair_requested', [
+                'tenant_id' => (string) $tenant->getKey(),
+                'tenant_slug' => (string) $tenant->slug,
+                'reason' => $reason,
+                'schema_version' => $this->snapshotSchemaVersion($snapshotDocument),
+                'expected_schema_version' => self::SCHEMA_VERSION,
+            ]);
 
             try {
                 $snapshot = $this->repair($tenant, $reason, [
                     'trigger' => 'read_path',
                     'request_host' => $requestHost,
-                    'source_version' => $sourceVersion,
                 ]);
 
-                return $this->hydrateSnapshot(
-                    tenant: $tenant,
-                    snapshot: $snapshot,
-                    requestRoot: $requestRoot,
-                    requestHost: $requestHost,
-                );
+                return $this->hydrateSnapshot($tenant, $snapshot, $requestRoot, $requestHost);
             } catch (\Throwable $exception) {
-                if ($this->hasUsableSnapshotDocument($tenant, $snapshotDocument)) {
+                if ($this->hasUsableSnapshotDocument($snapshotDocument)) {
                     Log::warning('tenant_environment_snapshot_repair_failed_serving_last_valid', [
                         'tenant_id' => (string) $tenant->getKey(),
                         'tenant_slug' => (string) $tenant->slug,
                         'reason' => $reason,
                         'error' => $exception->getMessage(),
                         'snapshot_version' => (string) ($snapshotDocument['snapshot_version'] ?? ''),
+                        'built_at' => $this->snapshotBuiltAtIso($snapshotDocument),
                     ]);
 
                     return $this->hydrateSnapshotPayload(
@@ -83,14 +96,36 @@ class TenantEnvironmentSnapshotService
         );
     }
 
-    /**
-     * @param  array<string, mixed>  $context
-     */
+    public function dispatchRefreshForCurrentTenant(string $reason, array $context = []): void
+    {
+        $tenant = Tenant::current();
+        if (! $tenant || ! $tenant->isCurrent()) {
+            return;
+        }
+
+        $this->dispatchRefreshForTenantId((string) $tenant->getKey(), $reason, $context);
+    }
+
+    public function dispatchRefreshForTenant(Tenant $tenant, string $reason, array $context = []): void
+    {
+        $this->dispatchRefreshForTenantId((string) $tenant->getKey(), $reason, $context);
+    }
+
+    public function dispatchRefreshForAllTenants(string $reason, array $context = []): void
+    {
+        foreach (Tenant::query()->get() as $tenant) {
+            if (! $tenant instanceof Tenant) {
+                continue;
+            }
+
+            $this->dispatchRefreshForTenant($tenant, $reason, $context);
+        }
+    }
+
     public function repair(Tenant $tenant, string $reason, array $context = []): TenantEnvironmentSnapshot
     {
         $startedAt = now();
         $started = microtime(true);
-        $sourceVersion = $this->sourceVersion($tenant);
         $snapshot = TenantEnvironmentSnapshot::current() ?? new TenantEnvironmentSnapshot([
             '_id' => TenantEnvironmentSnapshot::ROOT_ID,
         ]);
@@ -109,7 +144,6 @@ class TenantEnvironmentSnapshotService
 
             $snapshot->fill([
                 'schema_version' => self::SCHEMA_VERSION,
-                'source_version' => $sourceVersion,
                 'snapshot_version' => $snapshotVersion,
                 'snapshot' => $payload,
                 'built_at' => $finishedAt,
@@ -123,8 +157,8 @@ class TenantEnvironmentSnapshotService
                 'tenant_id' => (string) $tenant->getKey(),
                 'tenant_slug' => (string) $tenant->slug,
                 'reason' => $reason,
-                'source_version' => $sourceVersion,
                 'snapshot_version' => $snapshotVersion,
+                'built_at' => $finishedAt->toIso8601String(),
                 'duration_ms' => (int) round((microtime(true) - $started) * 1000),
             ]);
 
@@ -154,78 +188,119 @@ class TenantEnvironmentSnapshotService
         }
     }
 
-    private function snapshotIsCurrent(Tenant $tenant, ?array $snapshotDocument, string $sourceVersion): bool
+    public function summarize(TenantEnvironmentSnapshot $snapshot): array
+    {
+        return [
+            'schema_version' => (int) ($snapshot->schema_version ?? 0),
+            'snapshot_version' => (string) ($snapshot->snapshot_version ?? ''),
+            'built_at' => $snapshot->built_at?->toIso8601String(),
+            'last_rebuild_reason' => (string) ($snapshot->last_rebuild_reason ?? ''),
+            'last_rebuild_failed_at' => $snapshot->last_rebuild_failed_at?->toIso8601String(),
+            'last_rebuild_error' => (string) ($snapshot->last_rebuild_error ?? ''),
+        ];
+    }
+
+    private function needsRepairDocument(?array $snapshotDocument): bool
     {
         if ($snapshotDocument === null) {
-            return false;
+            return true;
         }
 
         if ($this->snapshotSchemaVersion($snapshotDocument) !== self::SCHEMA_VERSION) {
-            return false;
+            return true;
         }
 
-        if ((string) ($snapshotDocument['source_version'] ?? '') !== $sourceVersion) {
-            return false;
-        }
-
-        return $this->hasUsableSnapshotDocument($tenant, $snapshotDocument);
+        return ! $this->hasUsableSnapshotDocument($snapshotDocument);
     }
 
-    private function repairReason(?array $snapshotDocument, string $sourceVersion): string
+    private function hasUsableSnapshotDocument(?array $snapshotDocument): bool
     {
-        if ($snapshotDocument === null) {
-            return 'missing_snapshot';
-        }
-
-        if ($this->snapshotSchemaVersion($snapshotDocument) !== self::SCHEMA_VERSION) {
-            return 'version_drift';
-        }
-
-        if ((string) ($snapshotDocument['source_version'] ?? '') !== $sourceVersion) {
-            return 'source_drift';
-        }
-
-        return 'invalid_snapshot';
+        return $this->hasUsableSnapshotPayload($this->snapshotPayload($snapshotDocument));
     }
 
-    private function hasUsableSnapshotDocument(Tenant $tenant, ?array $snapshotDocument): bool
+    private function hasUsableSnapshotPayload(mixed $rawSnapshot): bool
     {
-        return $this->hasUsableSnapshotPayload($tenant, $this->snapshotPayload($snapshotDocument));
-    }
-
-    private function hasUsableSnapshotPayload(Tenant $tenant, mixed $rawSnapshot): bool
-    {
-        $snapshot = $this->normalizeMongoValue($rawSnapshot);
-
-        if (! is_array($snapshot)) {
-            return false;
+        if (is_array($rawSnapshot)) {
+            return $rawSnapshot !== [];
         }
 
-        if (($snapshot['type'] ?? null) !== 'tenant') {
-            return false;
+        if ($rawSnapshot instanceof \Countable) {
+            return count($rawSnapshot) > 0;
         }
 
-        if ((string) ($snapshot['tenant_id'] ?? '') !== (string) $tenant->getKey()) {
-            return false;
-        }
-
-        foreach (['name', 'subdomain', 'canonical_main_domain'] as $requiredStringKey) {
-            if (trim((string) ($snapshot[$requiredStringKey] ?? '')) === '') {
-                return false;
+        if ($rawSnapshot instanceof \Traversable) {
+            foreach ($rawSnapshot as $_) {
+                return true;
             }
         }
 
-        if (! array_key_exists('has_explicit_domains', $snapshot) || ! is_bool($snapshot['has_explicit_domains'])) {
-            return false;
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $context
+     */
+    private function dispatchRefreshForTenantId(string $tenantId, string $reason, array $context = []): void
+    {
+        if ($tenantId === '' || ! $this->landlordSnapshotContextAvailable()) {
+            return;
         }
 
-        foreach (['domains', 'web_domains', 'app_domains', 'branding', 'telemetry', 'firebase', 'push'] as $requiredArrayKey) {
-            if (! array_key_exists($requiredArrayKey, $snapshot) || ! is_array($snapshot[$requiredArrayKey])) {
-                return false;
+        $memoKey = sprintf('%s:%s', $tenantId, $reason);
+        if (isset($this->dispatchMemo[$memoKey])) {
+            return;
+        }
+
+        $this->dispatchMemo[$memoKey] = true;
+
+        $contextKey = (string) config('multitenancy.current_tenant_context_key', 'tenantId');
+        $hadPreviousTenantId = Context::has($contextKey);
+        $previousTenantId = $hadPreviousTenantId ? Context::get($contextKey) : null;
+        $previousCurrentTenant = Tenant::current();
+        $currentTenantId = trim((string) ($previousCurrentTenant?->getKey() ?? ''));
+        $restoreTenantId = $currentTenantId !== ''
+            ? $currentTenantId
+            : trim((string) ($previousTenantId ?? ''));
+
+        $dispatchTenant = $previousCurrentTenant instanceof Tenant
+            && (string) $previousCurrentTenant->getKey() === $tenantId
+            ? $previousCurrentTenant
+            : Tenant::query()->find($tenantId);
+
+        if ($dispatchTenant instanceof Tenant) {
+            $dispatchTenant->makeCurrent();
+        }
+
+        Context::add($contextKey, $tenantId);
+
+        try {
+            RebuildTenantEnvironmentSnapshotJob::dispatch($tenantId, $reason, $context);
+        } finally {
+            $restoreTenant = null;
+            if ($restoreTenantId !== '') {
+                $restoreTenant = $previousCurrentTenant instanceof Tenant
+                    && (string) $previousCurrentTenant->getKey() === $restoreTenantId
+                    ? $previousCurrentTenant
+                    : Tenant::query()->find($restoreTenantId);
+            }
+
+            if ($restoreTenant instanceof Tenant) {
+                $restoreTenant->makeCurrent();
+            } else {
+                Tenant::forgetCurrent();
+
+                if ($hadPreviousTenantId) {
+                    Context::add($contextKey, $previousTenantId);
+                } else {
+                    Context::forget($contextKey);
+                }
             }
         }
+    }
 
-        return true;
+    private function landlordSnapshotContextAvailable(): bool
+    {
+        return Landlord::query()->exists();
     }
 
     /**
@@ -256,12 +331,18 @@ class TenantEnvironmentSnapshotService
         ?string $requestRoot,
         ?string $requestHost,
     ): array {
-        return $this->payloadFactory->hydrateTenantPayload(
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.hydrate.start');
+
+        $payload = $this->payloadFactory->hydrateTenantPayload(
             tenant: $tenant,
             snapshot: $snapshotPayload,
             requestRoot: $requestRoot,
             requestHost: $requestHost,
         );
+
+        app(TenantRequestLifecycleTrace::class)->record('environment.snapshot.hydrate.complete');
+
+        return $payload;
     }
 
     /**
@@ -296,90 +377,19 @@ class TenantEnvironmentSnapshotService
         return $snapshotDocument['snapshot'] ?? [];
     }
 
-    /**
-     * @param  array<string, mixed>  $payload
-     */
-    private function snapshotVersion(array $payload): string
+    private function snapshotBuiltAtIso(?array $snapshotDocument): ?string
     {
-        return hash(
-            'sha256',
-            json_encode(
-                [
-                    'schema_version' => self::SCHEMA_VERSION,
-                    'payload' => $this->normalizeForHash($payload),
-                ],
-                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR
-            ) ?: Carbon::now()->toIso8601String(),
-        );
-    }
+        $builtAt = $snapshotDocument['built_at'] ?? null;
 
-    private function sourceVersion(Tenant $tenant): string
-    {
-        $landlord = Landlord::singleton();
-        $pushSettings = TenantPushSettings::current();
-
-        return hash(
-            'sha256',
-            json_encode(
-                [
-                    'schema_version' => self::SCHEMA_VERSION,
-                    'tenant' => [
-                        'id' => (string) $tenant->getKey(),
-                        'name' => (string) $tenant->name,
-                        'subdomain' => (string) $tenant->subdomain,
-                        'updated_at' => $this->dateMarker($tenant->updated_at ?? null),
-                        'branding_data' => $this->normalizeForHash($tenant->branding_data ?? []),
-                        'domains' => $this->tenantDomainMarkers($tenant),
-                        'app_domains' => $this->normalizeForHash($tenant->app_domains ?? []),
-                    ],
-                    'landlord' => [
-                        'id' => (string) $landlord->getKey(),
-                        'updated_at' => $this->dateMarker($landlord->updated_at ?? null),
-                        'branding_data' => $this->normalizeForHash($landlord->branding_data ?? []),
-                    ],
-                    'push_settings' => $pushSettings instanceof TenantPushSettings ? [
-                        'id' => (string) $pushSettings->getKey(),
-                        'updated_at' => $this->dateMarker($pushSettings->updated_at ?? null),
-                        'telemetry' => $this->normalizeForHash($pushSettings->getAttribute('telemetry') ?? []),
-                        'firebase' => $this->normalizeForHash($pushSettings->getAttribute('firebase') ?? []),
-                        'push' => $this->normalizeForHash($pushSettings->getAttribute('push') ?? []),
-                    ] : [],
-                ],
-                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR
-            ) ?: Carbon::now()->toIso8601String(),
-        );
-    }
-
-    /**
-     * @return array<int, array<string, mixed>>
-     */
-    private function tenantDomainMarkers(Tenant $tenant): array
-    {
-        return $tenant->domains()
-            ->whereIn('type', [
-                Tenant::DOMAIN_TYPE_WEB,
-                Tenant::DOMAIN_TYPE_APP_ANDROID,
-                Tenant::DOMAIN_TYPE_APP_IOS,
-            ])
-            ->orderBy('type')
-            ->orderBy('path')
-            ->get(['_id', 'type', 'path', 'updated_at'])
-            ->map(fn ($domain): array => [
-                'id' => (string) $domain->getKey(),
-                'type' => (string) $domain->type,
-                'path' => (string) $domain->path,
-                'updated_at' => $this->dateMarker($domain->updated_at ?? null),
-            ])
-            ->all();
-    }
-
-    private function rawSnapshotPayload(TenantEnvironmentSnapshot $snapshot): mixed
-    {
-        if (method_exists($snapshot, 'getRawOriginal')) {
-            return $snapshot->getRawOriginal('snapshot');
+        if ($builtAt instanceof \MongoDB\BSON\UTCDateTime) {
+            return Carbon::instance($builtAt->toDateTime())->toIso8601String();
         }
 
-        return $snapshot->getAttributes()['snapshot'] ?? null;
+        if ($builtAt instanceof \DateTimeInterface) {
+            return Carbon::instance(\DateTimeImmutable::createFromInterface($builtAt))->toIso8601String();
+        }
+
+        return null;
     }
 
     private function normalizeMongoValue(mixed $value): mixed
@@ -408,44 +418,29 @@ class TenantEnvironmentSnapshotService
         return $value;
     }
 
-    private function normalizeForHash(mixed $value): mixed
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function snapshotVersion(array $payload): string
     {
-        $value = $this->normalizeMongoValue($value);
-
-        if ($value instanceof \MongoDB\BSON\UTCDateTime) {
-            return $value->toDateTime()->format(DATE_ATOM);
-        }
-
-        if ($value instanceof \DateTimeInterface) {
-            return $value->format(DATE_ATOM);
-        }
-
-        if (is_array($value)) {
-            $normalized = [];
-            foreach ($value as $key => $item) {
-                $normalized[$key] = $this->normalizeForHash($item);
-            }
-
-            if (! array_is_list($normalized)) {
-                ksort($normalized);
-            }
-
-            return $normalized;
-        }
-
-        return $value;
+        return hash(
+            'sha256',
+            json_encode(
+                [
+                    'schema_version' => self::SCHEMA_VERSION,
+                    'payload' => $payload,
+                ],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR
+            ) ?: Carbon::now()->toIso8601String(),
+        );
     }
 
-    private function dateMarker(mixed $value): ?string
+    private function rawSnapshotPayload(TenantEnvironmentSnapshot $snapshot): mixed
     {
-        if ($value instanceof \MongoDB\BSON\UTCDateTime) {
-            return $value->toDateTime()->format(DATE_ATOM);
+        if (method_exists($snapshot, 'getRawOriginal')) {
+            return $snapshot->getRawOriginal('snapshot');
         }
 
-        if ($value instanceof \DateTimeInterface) {
-            return $value->format(DATE_ATOM);
-        }
-
-        return is_scalar($value) ? (string) $value : null;
+        return $snapshot->getAttributes()['snapshot'] ?? null;
     }
 }

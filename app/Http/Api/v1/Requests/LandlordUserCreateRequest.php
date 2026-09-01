@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Requests;
 
 use App\Rules\EmailAvailableRule;
+use App\Support\Validation\CanonicalPasswordRules;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
 
@@ -26,24 +27,19 @@ class LandlordUserCreateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'required|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'required|string|max:'.InputConstraints::NAME_MAX,
             'email' => [
                 'required',
                 'string',
                 'email',
-                'max:' . InputConstraints::EMAIL_MAX,
+                'max:'.InputConstraints::EMAIL_MAX,
                 new EmailAvailableRule('landlord', 'landlord_users'),
             ],
-            'password' => [
-                'required',
-                'string',
-                'min:' . InputConstraints::PASSWORD_MIN,
-                'max:' . InputConstraints::PASSWORD_MAX,
-            ],
+            'password' => CanonicalPasswordRules::required(),
             'role_id' => [
                 'required',
                 'string',
-                'size:' . InputConstraints::OBJECT_ID_LENGTH,
+                'size:'.InputConstraints::OBJECT_ID_LENGTH,
                 'regex:/^[a-fA-F0-9]{24}$/',
                 'exists:landlord.landlord_roles,_id',
             ],

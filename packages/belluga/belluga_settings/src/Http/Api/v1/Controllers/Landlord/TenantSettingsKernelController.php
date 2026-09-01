@@ -1,0 +1,73 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Belluga\Settings\Http\Api\v1\Controllers\Landlord;
+
+use Belluga\Settings\Application\SettingsKernelService;
+use Belluga\Settings\Contracts\TenantEnvironmentSnapshotRepairContract;
+use Belluga\Settings\Contracts\TenantScopeContextContract;
+use Belluga\Settings\Exceptions\SettingsNamespaceNotFoundException;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+
+class TenantSettingsKernelController
+{
+    public function __construct(
+        private readonly SettingsKernelService $service,
+        private readonly TenantScopeContextContract $tenantContext,
+        private readonly TenantEnvironmentSnapshotRepairContract $tenantEnvironmentSnapshotRepair,
+    ) {}
+
+    public function schema(Request $request, string $tenant_slug): JsonResponse
+    {
+        $data = $this->tenantContext->runForTenantSlug($tenant_slug, function () use ($request): array {
+            return $this->service->schema('tenant', $request->user());
+        });
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function values(Request $request, string $tenant_slug): JsonResponse
+    {
+        $data = $this->tenantContext->runForTenantSlug($tenant_slug, function () use ($request): array {
+            return $this->service->values('tenant', $request->user());
+        });
+
+        return response()->json(['data' => $data]);
+    }
+
+    public function patch(Request $request, string $tenant_slug, string $namespace): JsonResponse
+    {
+        $payload = $request->json()->all();
+
+        if (! is_array($payload) || array_is_list($payload)) {
+            return response()->json([
+                'message' => 'The payload must be an object/map.',
+                'errors' => [
+                    'payload' => ['The payload must be an object/map.'],
+                ],
+            ], 422);
+        }
+
+        try {
+            $data = $this->tenantContext->runForTenantSlug($tenant_slug, function () use ($request, $namespace, $payload): array {
+                $data = $this->service->patchNamespace('tenant', $request->user(), $namespace, $payload);
+                $this->tenantEnvironmentSnapshotRepair->repairCurrentTenant(
+                    'tenant_settings_namespace_updated_sync',
+                    [
+                        'trigger' => 'landlord_tenant_settings_patch',
+                        'namespace' => $namespace,
+                        'changed_fields' => array_keys($payload),
+                    ],
+                );
+
+                return $data;
+            });
+        } catch (SettingsNamespaceNotFoundException) {
+            abort(404, 'Settings namespace not found.');
+        }
+
+        return response()->json(['data' => $data]);
+    }
+}

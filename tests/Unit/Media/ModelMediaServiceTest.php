@@ -1,0 +1,336 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Media;
+
+use Belluga\Media\Application\ModelMediaService;
+use Belluga\Media\Contracts\TenantMediaScopeResolverContract;
+use Belluga\Media\Support\MediaModelDefinition;
+use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
+use Tests\TestCase;
+
+class ModelMediaServiceTest extends TestCase
+{
+    public function test_apply_uploads_stores_avatar_and_cover_using_tenant_scoped_directory(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/static-assets',
+            canonicalPublicPathPrefix: '/api/v1/media/static-assets',
+            storageDirectory: 'static_assets',
+            slots: ['avatar', 'cover'],
+        );
+
+        $model = new FakeMediaModel('asset-123');
+        $request = Request::create('https://tenant-zeta.test/admin/api/v1/static_assets', 'POST', [], [], [
+            'avatar' => UploadedFile::fake()->image('avatar.png', 128, 128),
+            'cover' => UploadedFile::fake()->image('cover.jpg', 320, 160),
+        ]);
+
+        $updates = $service->applyUploads($request, $model, $definition);
+
+        $this->assertArrayHasKey('avatar_url', $updates);
+        $this->assertArrayHasKey('cover_url', $updates);
+        $this->assertStringContainsString('/api/v1/media/static-assets/asset-123/avatar', (string) $updates['avatar_url']);
+        $this->assertStringContainsString('/api/v1/media/static-assets/asset-123/cover', (string) $updates['cover_url']);
+        Storage::disk('public')->assertExists('tenants/tenant-zeta/static_assets/asset-123/avatar.png');
+        Storage::disk('public')->assertExists('tenants/tenant-zeta/static_assets/asset-123/cover.jpg');
+    }
+
+    public function test_apply_uploads_remove_flags_clear_urls_and_delete_existing_files(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/static-assets',
+            canonicalPublicPathPrefix: '/api/v1/media/static-assets',
+            storageDirectory: 'static_assets',
+            slots: ['avatar', 'cover'],
+        );
+
+        $model = new FakeMediaModel('asset-456');
+        Storage::disk('public')->put('tenants/tenant-zeta/static_assets/asset-456/avatar.png', 'avatar');
+        Storage::disk('public')->put('tenants/tenant-zeta/static_assets/asset-456/cover.png', 'cover');
+        $model->avatar_url = 'https://tenant-zeta.test/api/v1/media/static-assets/asset-456/avatar?v=1';
+        $model->cover_url = 'https://tenant-zeta.test/api/v1/media/static-assets/asset-456/cover?v=1';
+
+        $request = Request::create(
+            'https://tenant-zeta.test/admin/api/v1/static_assets/asset-456',
+            'POST',
+            ['remove_avatar' => '1', 'remove_cover' => '1'],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'application/x-www-form-urlencoded'],
+        );
+        $this->assertFalse($request->hasFile('avatar'));
+        $this->assertFalse($request->hasFile('cover'));
+        $this->assertTrue($request->boolean('remove_avatar'));
+        $this->assertTrue($request->boolean('remove_cover'));
+
+        $updates = $service->applyUploads($request, $model, $definition);
+
+        $this->assertArrayHasKey('avatar_url', $updates, json_encode($updates));
+        $this->assertArrayHasKey('cover_url', $updates, json_encode($updates));
+        $this->assertNull($updates['avatar_url'], json_encode($updates));
+        $this->assertNull($updates['cover_url'], json_encode($updates));
+        Storage::disk('public')->assertMissing('tenants/tenant-zeta/static_assets/asset-456/avatar.png');
+        Storage::disk('public')->assertMissing('tenants/tenant-zeta/static_assets/asset-456/cover.png');
+    }
+
+    public function test_normalize_public_url_converts_legacy_and_canonical_paths(): void
+    {
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/static-assets',
+            canonicalPublicPathPrefix: '/api/v1/media/static-assets',
+            storageDirectory: 'static_assets',
+            slots: ['avatar', 'cover'],
+        );
+
+        $model = new FakeMediaModel('asset-789');
+        $model->updated_at = \DateTimeImmutable::createFromFormat('U', '1700000000') ?: null;
+
+        $legacy = $service->normalizePublicUrl(
+            baseUrl: 'https://tenant-zeta.test',
+            model: $model,
+            kind: 'avatar',
+            definition: $definition,
+            rawUrl: 'https://tenant-zeta.test/static-assets/asset-789/avatar?v=42',
+        );
+        $canonical = $service->normalizePublicUrl(
+            baseUrl: 'https://tenant-zeta.test',
+            model: $model,
+            kind: 'cover',
+            definition: $definition,
+            rawUrl: 'https://tenant-zeta.test/api/v1/media/static-assets/asset-789/cover',
+        );
+
+        $this->assertSame(
+            'https://tenant-zeta.test/api/v1/media/static-assets/asset-789/avatar?v=42',
+            $legacy
+        );
+        $this->assertSame(
+            'https://tenant-zeta.test/api/v1/media/static-assets/asset-789/cover?v=1700000000',
+            $canonical
+        );
+    }
+
+    public function test_normalize_public_url_keeps_external_url_untouched(): void
+    {
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/static-assets',
+            canonicalPublicPathPrefix: '/api/v1/media/static-assets',
+            storageDirectory: 'static_assets',
+            slots: ['avatar', 'cover'],
+        );
+
+        $model = new FakeMediaModel('asset-900');
+        $external = 'https://cdn.example.com/media/avatar.png';
+
+        $normalized = $service->normalizePublicUrl(
+            baseUrl: 'https://tenant-zeta.test',
+            model: $model,
+            kind: 'avatar',
+            definition: $definition,
+            rawUrl: $external,
+        );
+
+        $this->assertSame($external, $normalized);
+    }
+
+    public function test_store_upload_can_be_used_outside_apply_uploads_for_nested_payloads(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/branding-public-web',
+            canonicalPublicPathPrefix: '/api/v1/media/branding-public-web',
+            storageDirectory: 'branding_public_web',
+            slots: ['default_image'],
+        );
+
+        $model = new FakeMediaModel('brand-123');
+        $storedUrl = $service->storeUpload(
+            baseUrl: 'https://tenant-zeta.test',
+            model: $model,
+            kind: 'default_image',
+            file: UploadedFile::fake()->image('default-image.jpg', 1200, 630),
+            definition: $definition,
+        );
+
+        $this->assertMatchesRegularExpression(
+            '#^/api/v1/media/branding-public-web/brand-123/default_image\?v=[A-Za-z0-9]+$#',
+            $storedUrl,
+        );
+        Storage::disk('public')->assertExists(
+            'tenants/tenant-zeta/branding_public_web/brand-123/default_image.jpg'
+        );
+    }
+
+    public function test_remove_upload_deletes_existing_slot_file(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/branding-public-web',
+            canonicalPublicPathPrefix: '/api/v1/media/branding-public-web',
+            storageDirectory: 'branding_public_web',
+            slots: ['default_image'],
+        );
+
+        $model = new FakeMediaModel('brand-456');
+        Storage::disk('public')->put(
+            'tenants/tenant-zeta/branding_public_web/brand-456/default_image.png',
+            'default-image'
+        );
+
+        $service->removeUpload(
+            model: $model,
+            kind: 'default_image',
+            definition: $definition,
+            baseUrl: 'https://tenant-zeta.test',
+        );
+
+        Storage::disk('public')->assertMissing(
+            'tenants/tenant-zeta/branding_public_web/brand-456/default_image.png'
+        );
+    }
+
+    public function test_resolve_variant_media_path_for_base_url_supports_gallery_variants(): void
+    {
+        Storage::fake('public');
+
+        $service = new ModelMediaService(new class implements TenantMediaScopeResolverContract
+        {
+            public function resolveTenantScope(?string $baseUrl): ?string
+            {
+                return 'tenant-zeta';
+            }
+        });
+
+        $definition = new MediaModelDefinition(
+            legacyPublicPathPrefix: '/account-profiles',
+            canonicalPublicPathPrefix: '/api/v1/media/account-profiles',
+            storageDirectory: 'account_profiles',
+            slots: ['avatar', 'cover'],
+        );
+
+        Storage::disk('public')->put(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.jpg',
+            'master'
+        );
+        Storage::disk('public')->put(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.thumb.jpg',
+            'thumb'
+        );
+
+        $model = new FakeMediaModel('profile-123');
+
+        $masterPath = $service->resolveVariantMediaPathForBaseUrl(
+            $model,
+            'gallery-item-main',
+            null,
+            $definition,
+            'https://tenant-zeta.test',
+        );
+        $thumbPath = $service->resolveVariantMediaPathForBaseUrl(
+            $model,
+            'gallery-item-main',
+            'thumb',
+            $definition,
+            'https://tenant-zeta.test',
+        );
+
+        $this->assertSame(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.jpg',
+            $masterPath
+        );
+        $this->assertSame(
+            'tenants/tenant-zeta/account_profiles/profile-123/gallery-item-main.thumb.jpg',
+            $thumbPath
+        );
+    }
+}
+
+final class FakeMediaModel
+{
+    public ?\DateTimeInterface $updated_at = null;
+
+    public ?string $avatar_url = null;
+
+    public ?string $cover_url = null;
+
+    public bool $saved = false;
+
+    public function __construct(
+        public string $_id,
+    ) {}
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    public function fill(array $attributes): void
+    {
+        foreach ($attributes as $key => $value) {
+            $this->{$key} = $value;
+        }
+    }
+
+    public function save(): void
+    {
+        $this->saved = true;
+    }
+
+    public function refresh(): void {}
+}

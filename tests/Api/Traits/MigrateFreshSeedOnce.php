@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\DB;
 
 trait MigrateFreshSeedOnce
 {
-
     protected static bool $migrationHasRunOnce = false;
 
     protected function migrationCommand(): string
@@ -17,7 +16,7 @@ trait MigrateFreshSeedOnce
         $tenantDsn = (string) env('DB_URI_TENANTS', '');
         $dsn = $landlordDsn !== '' ? $landlordDsn : $tenantDsn;
 
-        // Mongo database drops are asynchronous; keep migrations deterministic with collection cleanup.
+        // Avoid migrate:fresh on Mongo; dropDatabase can race with subsequent migrations.
         if ($dsn !== '' && str_contains($dsn, 'mongodb')) {
             return 'migrate';
         }
@@ -27,14 +26,16 @@ trait MigrateFreshSeedOnce
 
     protected function migrateOnce(): void
     {
-        if (!static::$migrationHasRunOnce) {
+        if (! static::$migrationHasRunOnce) {
 
             $command = $this->migrationCommand();
             $tenantPaths = $this->tenantMigrationPathArgs();
-            $landlordPaths = $this->landlordMigrationPathArgs();
 
             if ($command === 'migrate') {
                 $this->wipeMongoCollections();
+            }
+            if ($command === 'migrate:fresh') {
+                $this->dropTenantDatabases();
             }
 
             Artisan::call(sprintf(
@@ -43,9 +44,8 @@ trait MigrateFreshSeedOnce
                 $tenantPaths
             ));
             Artisan::call(sprintf(
-                '%s --database=landlord %s',
-                $command,
-                $landlordPaths
+                '%s --database=landlord --path=database/migrations/landlord',
+                $command
             ));
 
             static::$migrationHasRunOnce = true;
@@ -62,34 +62,18 @@ trait MigrateFreshSeedOnce
         ));
     }
 
-    protected function landlordMigrationPathArgs(): string
-    {
-        $paths = (array) config('multitenancy.landlord_migration_paths', ['database/migrations/landlord']);
-
-        return implode(' ', array_map(
-            static fn (string $path): string => sprintf('--path=%s', $path),
-            $paths
-        ));
-    }
-
     protected function wipeMongoCollections(): void
     {
-        $tenantDatabaseNames = Tenant::query()
-            ->pluck('database')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
         $landlordDatabase = DB::connection('landlord')->getDatabase();
         $tenantDatabase = DB::connection('tenant')->getDatabase();
+        $tenantDatabaseNames = $this->tenantDatabaseNamesForRefresh();
 
         foreach ($landlordDatabase->listCollectionNames() as $collectionName) {
-            $landlordDatabase->selectCollection($collectionName)->deleteMany([]);
+            $landlordDatabase->dropCollection($collectionName);
         }
 
         foreach ($tenantDatabase->listCollectionNames() as $collectionName) {
-            $tenantDatabase->selectCollection($collectionName)->deleteMany([]);
+            $tenantDatabase->dropCollection($collectionName);
         }
 
         if (empty($tenantDatabaseNames)) {
@@ -102,8 +86,49 @@ trait MigrateFreshSeedOnce
             $database = $tenantClient->selectDatabase($databaseName);
 
             foreach ($database->listCollectionNames() as $collectionName) {
-                $database->selectCollection($collectionName)->deleteMany([]);
+                $database->dropCollection($collectionName);
             }
         }
+    }
+
+    protected function dropTenantDatabases(): void
+    {
+        $tenantClient = DB::connection('tenant')->getMongoClient();
+        $defaultTenantDb = (string) config('database.connections.tenant.database');
+
+        foreach ($tenantClient->listDatabases() as $databaseInfo) {
+            $databaseName = $databaseInfo->getName();
+
+            if (str_starts_with($databaseName, 'tenant_') || $databaseName === $defaultTenantDb) {
+                $tenantClient->selectDatabase($databaseName)->drop();
+            }
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function tenantDatabaseNamesForRefresh(): array
+    {
+        $tenantClient = DB::connection('tenant')->getMongoClient();
+        $tenantPrefix = Tenant::tenantDatabasePrefix();
+
+        $names = Tenant::query()
+            ->withTrashed()
+            ->pluck('database')
+            ->filter()
+            ->map(static fn ($name): string => (string) $name)
+            ->values()
+            ->all();
+
+        foreach ($tenantClient->listDatabases() as $databaseInfo) {
+            $databaseName = (string) $databaseInfo->getName();
+
+            if (str_starts_with($databaseName, $tenantPrefix)) {
+                $names[] = $databaseName;
+            }
+        }
+
+        return array_values(array_unique($names));
     }
 }

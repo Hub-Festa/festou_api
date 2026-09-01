@@ -3,18 +3,18 @@
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Branding\BrandingPublicWebMediaService;
+use App\Application\Branding\LandlordBrandingManagementService;
 use App\Http\Api\v1\Requests\UpdateBrandingRequest;
 use App\Models\Landlord\Landlord;
-use App\Support\Helpers\ArrayReplaceEmptyAware;
 use App\Traits\HasLogoFiles;
 use Illuminate\Http\JsonResponse;
 
 class LandlordBrandingController
 {
-
     use HasLogoFiles;
 
     public function __construct(
+        private readonly LandlordBrandingManagementService $brandingService,
         private readonly BrandingPublicWebMediaService $brandingPublicWebMediaService,
     ) {}
 
@@ -23,8 +23,7 @@ class LandlordBrandingController
         $landlord = Landlord::singleton();
         $newData = $request->validated();
 
-        $uploadedLogoUrls = $this->processLogoUploads($request);
-
+        $uploadedLogoUrls = $this->processLogoUploads($request, $landlord);
         if ($request->hasFile('public_web_metadata.default_image')) {
             $newData['public_web_metadata']['default_image'] = $this->brandingPublicWebMediaService->storeDefaultImage(
                 $request->getSchemeAndHttpHost(),
@@ -33,32 +32,30 @@ class LandlordBrandingController
             );
         }
 
-        $brandingArray = $newData;
-        $brandingArray['logo_settings'] = $uploadedLogoUrls;
-
-        if ($request->hasFile("logo_settings.pwa_icon")) {
-            $brandingArray['pwa_icon'] = $this->generatePwaIconVariants(
-                sourceFile: $request->file("logo_settings.pwa_icon"),
+        $pwaVariants = [];
+        if ($request->hasFile('logo_settings.pwa_icon')) {
+            $pwaVariants = $this->generatePwaIconVariants(
+                sourceFile: $request->file('logo_settings.pwa_icon'),
+                brandable: $landlord,
+                baseUrl: $request->getSchemeAndHttpHost(),
             );
         }
 
-        $landlord->branding_data = ArrayReplaceEmptyAware::mergeIfOverridenIsNotEmptyRecursive(
-            mainArray:  $landlord->branding_data,
-            overrideArray: $brandingArray
+        $brandingData = $this->brandingService->update(
+            $landlord,
+            $newData,
+            $uploadedLogoUrls,
+            $pwaVariants
         );
-        if ($request->hasFile('public_web_metadata.default_image')) {
-            $landlord->branding_data['public_web_metadata']['default_image'] = (string) $newData['public_web_metadata']['default_image'];
-        }
-        $landlord->branding_data = $this->brandingPublicWebMediaService->materializeBrandingData(
+        $brandingData = $this->brandingPublicWebMediaService->materializeBrandingData(
             $request->getSchemeAndHttpHost(),
             $landlord,
-            $landlord->branding_data
+            $brandingData
         );
-        $landlord->save();
 
         return response()->json([
             'message' => 'Branding data updated successfully.',
-            'branding_data' => $landlord->branding_data,
+            'branding_data' => $brandingData,
         ]);
     }
 }

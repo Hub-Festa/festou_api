@@ -31,25 +31,31 @@ class FlutterWebShellRenderer
             $sanitizedShell = $shell;
         }
 
-        $metadataBlock = implode("\n        ", array_filter([
+        $injectedMetadata = implode("\n        ", array_filter([
             '<title>'.$this->escape($metadata['title'] ?? '').'</title>',
             '<meta name="description" content="'.$this->escape($metadata['description'] ?? '').'">',
             '<link rel="canonical" href="'.$this->escape($metadata['canonical_url'] ?? '').'">',
             '<meta property="og:title" content="'.$this->escape($metadata['title'] ?? '').'">',
             '<meta property="og:description" content="'.$this->escape($metadata['description'] ?? '').'">',
+            '<meta property="og:image" content="'.$this->escape($metadata['image'] ?? '').'">',
+            $this->optionalMetaProperty('og:image:secure_url', $metadata['image_secure_url'] ?? null),
+            $this->optionalMetaProperty('og:image:type', $metadata['image_type'] ?? null),
+            $this->optionalMetaProperty('og:image:width', $metadata['image_width'] ?? null),
+            $this->optionalMetaProperty('og:image:height', $metadata['image_height'] ?? null),
+            $this->optionalMetaProperty('og:image:alt', $metadata['image_alt'] ?? null),
             '<meta property="og:url" content="'.$this->escape($metadata['canonical_url'] ?? '').'">',
             '<meta property="og:type" content="'.$this->escape($metadata['type'] ?? 'website').'">',
             '<meta property="og:site_name" content="'.$this->escape($metadata['site_name'] ?? '').'">',
-            $this->optionalMetaProperty('og:image', $metadata['image'] ?? null),
             '<meta name="twitter:card" content="summary_large_image">',
             '<meta name="twitter:title" content="'.$this->escape($metadata['title'] ?? '').'">',
             '<meta name="twitter:description" content="'.$this->escape($metadata['description'] ?? '').'">',
-            $this->optionalMetaName('twitter:image', $metadata['image'] ?? null),
+            '<meta name="twitter:image" content="'.$this->escape($metadata['image'] ?? '').'">',
+            $this->optionalMetaName('twitter:image:alt', $metadata['image_alt'] ?? null),
         ]));
 
         $rendered = preg_replace(
             '/<\/head>/i',
-            "        {$metadataBlock}\n    </head>",
+            "        {$injectedMetadata}\n    </head>",
             $sanitizedShell,
             1
         );
@@ -107,15 +113,6 @@ class FlutterWebShellRenderer
             $basePath = $app->basePath();
             if (! is_string($basePath) || trim($basePath) === '') {
                 return null;
-            }
-
-            foreach ([
-                $basePath.'/../web-app/index.html',
-                $basePath.'/web-app/index.html',
-            ] as $candidate) {
-                if (is_file($candidate)) {
-                    return $candidate;
-                }
             }
 
             return $basePath.'/../web-app/index.html';

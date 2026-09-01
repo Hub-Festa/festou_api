@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace App\Application\Accounts;
 
-use App\Application\Accounts\AccountUserAccessService;
 use App\Domain\FoundationControlPlane\Identity\Exceptions\IdentityAlreadyExistsException;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountRoleTemplate;
 use App\Models\Tenants\AccountUser;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -19,12 +19,12 @@ class AccountUserService
 {
     public function __construct(
         private readonly PasswordIdentityRegistrar $passwordIdentityRegistrar,
-        private readonly AccountUserAccessService $accessService
-    ) {
-    }
+        private readonly AccountUserAccessService $accessService,
+        private readonly PushUserGatewayContract $pushUsers,
+    ) {}
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     public function create(Account $account, array $payload, string $roleId): AccountUser
     {
@@ -48,12 +48,17 @@ class AccountUserService
                 ]);
             }
 
+            $this->pushUsers->syncPushDeviceAccountIds(
+                (string) $user->_id,
+                $user->fresh()->getAccessToIds(),
+            );
+
             return $user->fresh();
         });
     }
 
     /**
-     * @param array<string, mixed> $attributes
+     * @param  array<string, mixed>  $attributes
      */
     public function update(AccountUser $user, array $attributes): AccountUser
     {
@@ -79,7 +84,11 @@ class AccountUserService
 
     public function remove(Account $account, AccountUser $user): void
     {
-        DB::connection('tenant')->transaction(function () use ($account, $user): void {
+        $deactivateUserId = null;
+        $syncUserId = null;
+        $syncAccessIds = [];
+
+        DB::connection('tenant')->transaction(function () use ($account, $user, &$deactivateUserId, &$syncUserId, &$syncAccessIds): void {
             $user->accountRoles()
                 ->where('account_id', $account->id)
                 ->first()
@@ -87,12 +96,28 @@ class AccountUserService
 
             if (count($user->getAccessToIds()) === 0) {
                 $user->delete();
+                $deactivateUserId = (string) $user->_id;
+
+                return;
             }
+
+            $syncUserId = (string) $user->_id;
+            $syncAccessIds = $user->getAccessToIds();
         });
+
+        if (is_string($deactivateUserId) && $deactivateUserId !== '') {
+            $this->pushUsers->deactivatePushDevicesForUser($deactivateUserId);
+
+            return;
+        }
+
+        if (is_string($syncUserId) && $syncUserId !== '') {
+            $this->pushUsers->syncPushDeviceAccountIds($syncUserId, $syncAccessIds);
+        }
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function normalizeCreatePayload(array $payload): array
     {
@@ -105,7 +130,7 @@ class AccountUserService
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * @param  array<string, mixed>  $payload
      */
     private function findOrCreateUser(array $payload): AccountUser
     {

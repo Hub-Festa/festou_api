@@ -27,7 +27,7 @@ class TenantAppDomainRequest extends FormRequest
                 'app_domain' => [
                     'sometimes',
                     'string',
-                    'max:' . InputConstraints::NAME_MAX,
+                    'max:'.InputConstraints::NAME_MAX,
                 ],
             ];
         }
@@ -41,34 +41,14 @@ class TenantAppDomainRequest extends FormRequest
             'identifier' => [
                 'required_without:app_domain',
                 'string',
-                'max:' . InputConstraints::NAME_MAX,
+                'max:'.InputConstraints::NAME_MAX,
             ],
+            // Legacy alias kept during transition; interpreted as Android identifier.
             'app_domain' => [
                 'sometimes',
                 'string',
-                'max:' . InputConstraints::NAME_MAX,
+                'max:'.InputConstraints::NAME_MAX,
             ],
         ];
-    }
-
-    public function platform(): string
-    {
-        $validated = $this->validated();
-        $platform = $validated['platform'] ?? null;
-
-        if (is_string($platform) && trim($platform) !== '') {
-            return strtolower(trim($platform));
-        }
-
-        return 'android';
-    }
-
-    public function identifier(): string
-    {
-        $validated = $this->validated();
-
-        $identifier = $validated['identifier'] ?? $validated['app_domain'] ?? '';
-
-        return is_string($identifier) ? strtolower(trim($identifier)) : '';
     }
 }

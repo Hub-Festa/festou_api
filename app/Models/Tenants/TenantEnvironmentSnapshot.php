@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
-use Shared\Settings\Models\SettingsDocument;
+use Belluga\Settings\Models\SettingsDocument;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 
 class TenantEnvironmentSnapshot extends SettingsDocument
@@ -15,7 +15,6 @@ class TenantEnvironmentSnapshot extends SettingsDocument
 
     protected $fillable = [
         'schema_version',
-        'source_version',
         'snapshot_version',
         'snapshot',
         'built_at',
@@ -28,7 +27,6 @@ class TenantEnvironmentSnapshot extends SettingsDocument
     ];
 
     protected $casts = [
-        'schema_version' => 'integer',
         'built_at' => 'datetime',
         'last_rebuild_started_at' => 'datetime',
         'last_rebuild_finished_at' => 'datetime',

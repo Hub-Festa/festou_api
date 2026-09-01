@@ -34,7 +34,7 @@ return new class extends Migration
                 try {
                     $collection->dropIndex($name);
                 } catch (\Throwable) {
-                    // Legacy runs may already have removed the single-field path index.
+                    // Repeated Mongo migrate flows can reach here after the legacy index was already removed.
                 }
             }
         }

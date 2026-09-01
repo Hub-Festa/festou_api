@@ -7,18 +7,21 @@ use Tests\Helpers\UserLabels;
 
 trait AdminAuthFunctions
 {
+    private static int $adminLoginRequestCounter = 0;
+
     protected function adminLogout(
         UserLabels $user,
         ?string $device_name = null,
-        ?bool $all_devices = null): TestResponse {
+        ?bool $all_devices = null): TestResponse
+    {
 
         $payload = [];
         if ($device_name !== null) {
-            $payload["device"] = $device_name;
+            $payload['device'] = $device_name;
         }
 
-        if($all_devices !== null) {
-            $payload["all_devices"] = $all_devices;
+        if ($all_devices !== null) {
+            $payload['all_devices'] = $all_devices;
         }
 
         $response = $this->json(
@@ -27,28 +30,49 @@ trait AdminAuthFunctions
             data: $payload,
             headers: [
                 'Authorization' => "Bearer {$user->token}",
-                'Content-Type' => 'application/json'
+                'Content-Type' => 'application/json',
             ]
         );
 
-        $user->token = "";
+        $user->token = '';
 
         return $response;
     }
 
-    protected function adminLogin(UserLabels $user, string $device_name = "default"): TestResponse {
-        $response = $this->json(
+    protected function adminLogin(UserLabels $user, string $device_name = 'default'): TestResponse
+    {
+        $response = $this->withServerVariables([
+            'REMOTE_ADDR' => $this->nextAdminLoginRemoteAddr(),
+        ])->json(
             method: 'post',
             uri: "http://{$this->host}/admin/api/v1/auth/login",
             data: [
-                "email" => $user->email_1,
-                "password" => $user->password,
-                "device_name" => $device_name
+                'email' => $user->email_1,
+                'password' => $user->password,
+                'device_name' => $device_name,
             ]
         );
 
-        $user->token = $response->json()['data']['token'];
+        if ($response->status() === 200) {
+            $token = $response->json('data.token');
+            if (is_string($token) && $token !== '') {
+                $user->token = $token;
+            }
+        }
 
         return $response;
+    }
+
+    private function nextAdminLoginRemoteAddr(): string
+    {
+        self::$adminLoginRequestCounter++;
+        $counter = self::$adminLoginRequestCounter;
+
+        return sprintf(
+            '173.%d.%d.%d',
+            16 + (($counter >> 16) % 200),
+            16 + (($counter >> 8) % 200),
+            16 + ($counter % 200),
+        );
     }
 }

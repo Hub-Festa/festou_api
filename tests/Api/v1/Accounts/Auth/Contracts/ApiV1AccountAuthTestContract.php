@@ -2,7 +2,6 @@
 
 namespace Tests\Api\v1\Accounts\Auth\Contracts;
 
-use App\Models\Landlord\Tenant;
 use App\Models\Tenants\Account;
 use Illuminate\Support\Str;
 use Tests\Api\Traits\AccountAuthFunctions;
@@ -11,7 +10,6 @@ use Tests\TestCaseAccount;
 
 abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
 {
-
     use AccountAuthFunctions;
 
     protected static array $seededAccounts = [];
@@ -19,6 +17,10 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
     protected function setUp(): void
     {
         parent::setUp();
+
+        $tenant = $this->ensureCanonicalTenantExists($this->tenant);
+        $tenant->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $tenant);
 
         $key = $this->accountSeedKey();
 
@@ -28,9 +30,10 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         }
     }
 
-    public function testUserLoginWrongPassword(): void {
+    public function testUserLoginWrongPassword(): void
+    {
 
-        $fake_user_label = new UserLabels("fake_user_label_wrong_password");
+        $fake_user_label = new UserLabels('fake_user_label_wrong_password');
         $fake_user_label->email_1 = $this->account->user_visitor->email_1;
         $fake_user_label->password = fake()->password(8);
 
@@ -39,15 +42,16 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $response->assertStatus(403);
 
         $response->assertJsonStructure([
-            "errors" => [
-                "credentials"
+            'errors' => [
+                'credentials',
             ],
         ]);
     }
 
-    public function testUserLoginWrongEmail(): void {
+    public function testUserLoginWrongEmail(): void
+    {
 
-        $fake_user_label = new UserLabels("fake_user_label_wrong_email");
+        $fake_user_label = new UserLabels('fake_user_label_wrong_email');
         $fake_user_label->email_1 = fake()->email;
         $fake_user_label->password = $this->account->user_visitor->password;
 
@@ -56,17 +60,18 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $response->assertStatus(403);
 
         $response->assertJsonStructure([
-            "errors" => [
-                "credentials"
+            'errors' => [
+                'credentials',
             ],
         ]);
 
     }
 
-    public function testUserLoginLogoutManyDevicesSuccess(): void {
+    public function testUserLoginLogoutManyDevicesSuccess(): void
+    {
 
-        $device_1 = "device_1";
-        $device_2 = "device_2";
+        $device_1 = 'device_1';
+        $device_2 = 'device_2';
 
         $responseUserAdmin = $this->accountLogin(
             $this->account->user_visitor,
@@ -76,9 +81,9 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $this->account->user_visitor->token = $responseUserAdmin->json()['data']['token'];
 
         $responseUserAdmin->assertJsonStructure([
-            "data" => [
-                "user",
-                "token",
+            'data' => [
+                'user',
+                'token',
             ],
         ]);
 
@@ -90,9 +95,9 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $this->account->user_visitor->token = $responseUserAdmin->json()['data']['token'];
 
         $responseUserAdmin->assertJsonStructure([
-            "data" => [
-                "user",
-                "token",
+            'data' => [
+                'user',
+                'token',
             ],
         ]);
 
@@ -102,11 +107,12 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         );
 
         $responseLogout->assertStatus(200);
-        $this->account->user_visitor->token = "";
+        $this->account->user_visitor->token = '';
 
     }
 
-    public function testLogin(): void {
+    public function testLogin(): void
+    {
 
         $responseUserAdmin = $this->accountLogin($this->account->user_admin);
 
@@ -119,28 +125,30 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $this->account->user_visitor->token = $responseUserAdmin->json()['data']['token'];
     }
 
-    public function testLoginWithToken(): void {
+    public function testLoginWithToken(): void
+    {
         $response = $this->accountTokenValidate($this->account->user_admin->token);
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user"
-            ]
+            'data' => [
+                'user',
+            ],
         ]);
 
         $response = $this->accountTokenValidate($this->account->user_visitor->token);
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user"
-            ]
+            'data' => [
+                'user',
+            ],
         ]);
     }
 
-    public function testLoginWithTokenError(): void {
-        $response = $this->accountTokenValidate("123");
+    public function testLoginWithTokenError(): void
+    {
+        $response = $this->accountTokenValidate('123');
         $response->assertStatus(401);
     }
 
@@ -169,15 +177,13 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
     private function seedAccountAuthFixtures(): void
     {
         $tenantLabel = $this->tenant;
-        $tenant = Tenant::query()
-            ->where('subdomain', $tenantLabel->subdomain)
-            ->firstOrFail();
+        $tenant = $this->ensureCanonicalTenantExists($tenantLabel);
         $tenant->makeCurrent();
 
         $tenantLabel->id = (string) $tenant->_id;
         $tenantLabel->slug = $tenant->slug;
 
-        $accountName = 'Account Auth ' . Str::uuid()->toString();
+        $accountName = 'Account Auth '.Str::uuid()->toString();
         $account = Account::create([
             'name' => $accountName,
             'document' => strtoupper(Str::random(14)),
@@ -192,7 +198,7 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
             $account,
             $this->account->user_admin,
             'Account Admin',
-            'admin+' . $account->slug . '@example.org',
+            'admin+'.$account->slug.'@example.org',
             'Secret!234',
             ['*']
         );
@@ -201,7 +207,7 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
             $account,
             $this->account->user_visitor,
             'Account Visitor',
-            'visitor+' . $account->slug . '@example.org',
+            'visitor+'.$account->slug.'@example.org',
             'Secret!234',
             []
         );
@@ -213,7 +219,12 @@ abstract class ApiV1AccountAuthTestContract extends TestCaseAccount
         $ref = new \ReflectionProperty($label, 'base_label');
         $ref->setAccessible(true);
 
-        return (string) $ref->getValue($label);
+        return sprintf(
+            '%s::%s::%s',
+            static::class,
+            $this->nameWithDataSet(),
+            (string) $ref->getValue($label),
+        );
     }
 
     private function seedAccountUser(

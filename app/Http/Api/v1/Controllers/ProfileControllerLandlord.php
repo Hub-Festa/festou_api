@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Profiles\LandlordProfileService;
-use App\Http\Api\v1\Requests\EmailsAddRequest;
 use App\Http\Api\v1\Requests\EmailRemoveRequest;
+use App\Http\Api\v1\Requests\EmailsAddRequest;
 use App\Http\Api\v1\Requests\GenerateTokenRequest;
 use App\Http\Api\v1\Requests\PhoneRemoveRequest;
 use App\Http\Api\v1\Requests\PhonesAddRequest;
 use App\Http\Api\v1\Requests\ResetPasswordRequestContract;
 use App\Http\Api\v1\Requests\UpdatePasswordRequest;
-use App\Http\Api\v1\Requests\UpdateProfileRequestContract;
+use App\Http\Api\v1\Requests\UpdateProfileRequestLandlord;
 use App\Http\Api\v1\Resources\UserResource;
 use App\Http\Controllers\Controller;
 use App\Models\Landlord\LandlordUser;
@@ -22,10 +22,9 @@ class ProfileControllerLandlord extends Controller
 {
     public function __construct(
         private readonly LandlordProfileService $profileService
-    ) {
-    }
+    ) {}
 
-    public function updateProfile(UpdateProfileRequestContract $request): JsonResponse
+    public function updateProfile(UpdateProfileRequestLandlord $request): JsonResponse
     {
         /** @var LandlordUser $user */
         $user = $request->user();

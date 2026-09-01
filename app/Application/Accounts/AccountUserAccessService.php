@@ -19,7 +19,8 @@ class AccountUserAccessService
     {
         return collect($user->account_roles ?? [])
             ->pluck('account_id')
-            ->map(static fn ($id): string => (string) $id)
+            ->map(static fn ($id): string => trim((string) $id))
+            ->filter(static fn (string $id): bool => $id !== '')
             ->unique()
             ->values()
             ->all();
@@ -33,11 +34,20 @@ class AccountUserAccessService
         $account ??= Account::current();
 
         if (! $account) {
-            throw new AuthenticationException();
+            throw new AuthenticationException;
         }
 
+        $accountIds = $this->accountComparisonIds($account);
+
         return collect($user->account_roles)
-            ->where('account_id', '==', (string) $account->_id)
+            ->filter(static function (mixed $role) use ($accountIds): bool {
+                $roleAccountId = self::roleAccountId($role);
+
+                return $roleAccountId !== ''
+                    && collect($accountIds)->contains(
+                        static fn (string $accountId): bool => hash_equals($accountId, $roleAccountId)
+                    );
+            })
             ->pluck('permissions')
             ->flatten()
             ->unique()
@@ -48,6 +58,31 @@ class AccountUserAccessService
     public function tokenAllows(AccountUser $user, string $ability): bool
     {
         $permissions = $this->permissions($user, Account::current());
+
+        return $this->abilityListAllows($permissions, $ability);
+    }
+
+    /**
+     * @param  array<int, string>  $allowedAbilities
+     */
+    public function abilityListAllows(array $allowedAbilities, string $ability): bool
+    {
+        $ability = trim($ability);
+        if ($ability === '') {
+            return false;
+        }
+
+        $allowedAbilities = collect($allowedAbilities)
+            ->map(static fn (mixed $allowedAbility): string => trim((string) $allowedAbility))
+            ->filter(static fn (string $allowedAbility): bool => $allowedAbility !== '')
+            ->unique()
+            ->values()
+            ->all();
+
+        if (in_array('*', $allowedAbilities, true) || in_array($ability, $allowedAbilities, true)) {
+            return true;
+        }
+
         $parts = explode(':', $ability, 2);
 
         if (count($parts) !== 2) {
@@ -56,12 +91,48 @@ class AccountUserAccessService
 
         [$resource, $action] = $parts;
 
-        return in_array("$resource:*", $permissions, true)
-            || in_array("$resource:$action", $permissions, true);
+        return $resource !== ''
+            && $action !== ''
+            && in_array("$resource:*", $allowedAbilities, true);
     }
 
     /**
-     * @param array<string, mixed> $metadata
+     * @return array<int, string>
+     */
+    private function accountComparisonIds(Account $account): array
+    {
+        return collect([
+            $account->id,
+            $account->_id,
+        ])
+            ->map(static fn (mixed $id): string => trim((string) $id))
+            ->filter(static fn (string $id): bool => $id !== '')
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private static function roleAccountId(mixed $role): string
+    {
+        $candidates = [
+            is_array($role) ? ($role['account_id'] ?? null) : null,
+            is_object($role) && method_exists($role, 'getAttribute') ? $role->getAttribute('account_id') : null,
+            is_object($role) && isset($role->account_id) ? $role->account_id : null,
+            data_get($role, 'account_id'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            $accountId = trim((string) $candidate);
+            if ($accountId !== '') {
+                return $accountId;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
      * @return array<string, mixed>
      */
     public function syncCredential(
@@ -97,7 +168,7 @@ class AccountUserAccessService
         }
 
         $credential = [
-            '_id' => (string) new ObjectId(),
+            '_id' => (string) new ObjectId,
             'provider' => $provider,
             'subject' => $subject,
             'secret_hash' => $secretHash,

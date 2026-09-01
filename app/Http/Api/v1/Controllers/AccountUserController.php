@@ -6,6 +6,7 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Accounts\AccountUserQueryService;
 use App\Application\Accounts\AccountUserService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Api\v1\Requests\AccountUserCreateRequest;
 use App\Http\Api\v1\Requests\UserUpdateRequest;
 use App\Http\Controllers\Controller;
@@ -14,16 +15,15 @@ use App\Models\Tenants\AccountUser;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use MongoDB\BSON\ObjectId;
 use Illuminate\Validation\ValidationException;
 
 class AccountUserController extends Controller
 {
     public function __construct(
         private readonly AccountUserService $accountUserService,
-        private readonly AccountUserQueryService $accountUserQueryService
-    ) {
-    }
+        private readonly AccountUserQueryService $accountUserQueryService,
+        private readonly TelemetryEmitter $telemetry
+    ) {}
 
     /**
      * Lista todos os usuários de um tenant
@@ -54,6 +54,7 @@ class AccountUserController extends Controller
     public function show(Request $request): JsonResponse
     {
         $user = $this->getFirstUserByRouteOrFail();
+
         return response()->json(['data' => $user]);
     }
 
@@ -74,6 +75,19 @@ class AccountUserController extends Controller
             $request->string('role_id')->toString()
         );
 
+        $actor = $request->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_user_created',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'target_user_id' => (string) $user->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
+
         return response()->json([
             'message' => 'Usuário criado com sucesso',
             'data' => $user,
@@ -87,13 +101,29 @@ class AccountUserController extends Controller
     {
         if (empty($request->validated())) {
             throw ValidationException::withMessages([
-                'empty' => 'Nenhum dado recebido para atualizar.'
+                'empty' => 'Nenhum dado recebido para atualizar.',
             ]);
         }
 
         $user = $this->getFirstUserByRouteOrFail();
 
-        $updated = $this->accountUserService->update($user, $request->validated());
+        $validated = $request->validated();
+        $updated = $this->accountUserService->update($user, $validated);
+
+        $actor = $request->user();
+        $account = Account::current();
+        if ($actor && $account) {
+            $this->telemetry->emit(
+                event: 'account_user_updated',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'target_user_id' => (string) $user->_id,
+                    'changed_fields' => array_keys($validated),
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
 
         return response()->json([
             'message' => 'Usuário atualizado com sucesso',
@@ -130,15 +160,31 @@ class AccountUserController extends Controller
 
         $this->accountUserService->remove($account, $user);
 
+        $actor = $request->user();
+        if ($actor) {
+            $this->telemetry->emit(
+                event: 'account_user_deleted',
+                userId: (string) $actor->_id,
+                properties: [
+                    'account_id' => (string) $account->_id,
+                    'target_user_id' => (string) $user->_id,
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
+
         return response()->json(['message' => 'Usuário removido da conta com sucesso']);
     }
 
     private function getFirstUserByRouteOrFail(): AccountUser
     {
-        $userId = request()->route('user_id');
+        $userId = (string) request()->route('user_id');
+        $account = Account::current();
 
-        return AccountUser::where('_id', new ObjectId($userId))
-            ->where('account_roles.account_id', Account::current()->id)
-            ->firstOrFail();
+        if (! $account) {
+            abort(401, 'Account context not available.');
+        }
+
+        return $this->accountUserQueryService->findByIdForAccountOrFail($account, $userId);
     }
 }

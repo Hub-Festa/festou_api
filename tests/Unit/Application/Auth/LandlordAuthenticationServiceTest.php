@@ -6,6 +6,7 @@ namespace Tests\Unit\Application\Auth;
 
 use App\Application\Auth\LandlordAuthenticationService;
 use App\Exceptions\Auth\InvalidCredentialsException;
+use App\Models\Landlord\LandlordRole;
 use App\Models\Landlord\LandlordUser;
 use Illuminate\Support\Facades\Hash;
 use PHPUnit\Framework\Attributes\Group;
@@ -32,11 +33,11 @@ class LandlordAuthenticationServiceTest extends TestCase
         $this->user = LandlordUser::create([
             'name' => 'Landlord Admin',
             'emails' => ['landlord@example.org'],
-            'password' => 'Secret!234',
         ]);
+        $this->user->syncCredential('password', 'landlord@example.org', Hash::make('Secret!234'));
     }
 
-    public function testLoginReturnsToken(): void
+    public function test_login_returns_token(): void
     {
         $result = $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
 
@@ -44,14 +45,81 @@ class LandlordAuthenticationServiceTest extends TestCase
         $this->assertNotEmpty($result->plainTextToken);
     }
 
-    public function testLoginThrowsOnInvalidCredentials(): void
+    public function test_login_accepts_canonical_password_credential_even_when_legacy_password_is_stale(): void
+    {
+        LandlordUser::query()
+            ->where('_id', $this->user->_id)
+            ->update([
+                'password' => Hash::make('Stale!234'),
+                'password_type' => 'laravel',
+            ]);
+
+        $result = $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
+
+        $this->assertSame('landlord@example.org', $result->user->emails[0]);
+        $this->assertNotEmpty($result->plainTextToken);
+    }
+
+    public function test_login_rejects_legacy_password_when_canonical_password_credential_disagrees(): void
+    {
+        $this->user->syncCredential('password', 'landlord@example.org', Hash::make('Another!234'));
+
+        $this->expectException(InvalidCredentialsException::class);
+
+        $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
+    }
+
+    public function test_login_rejects_legacy_password_without_canonical_password_credential(): void
+    {
+        LandlordUser::query()
+            ->where('_id', $this->user->_id)
+            ->update([
+                'credentials' => [],
+                'password' => Hash::make('Secret!234'),
+                'password_type' => 'laravel',
+            ]);
+
+        $this->expectException(InvalidCredentialsException::class);
+
+        $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
+    }
+
+    public function test_login_rejects_email_without_subject_specific_password_credential(): void
+    {
+        $this->user->emails = ['landlord@example.org', 'secondary@example.org'];
+        $this->user->save();
+
+        $this->expectException(InvalidCredentialsException::class);
+
+        $this->service->login('secondary@example.org', 'Secret!234', 'admin-client');
+    }
+
+    public function test_login_expands_wildcard_to_discovery_filter_settings_ability(): void
+    {
+        $role = LandlordRole::create([
+            'name' => 'Root Admin',
+            'permissions' => ['*'],
+        ]);
+        $role->users()->save($this->user);
+
+        $this->service->login('landlord@example.org', 'Secret!234', 'admin-client');
+
+        $token = $this->user->tokens()->first();
+        $this->assertNotNull($token);
+        $this->assertContains(
+            'discovery-filters-settings:update',
+            $token->abilities ?? []
+        );
+    }
+
+    public function test_login_throws_on_invalid_credentials(): void
     {
         $this->expectException(InvalidCredentialsException::class);
 
         $this->service->login('landlord@example.org', 'invalid', 'admin-client');
     }
 
-    public function testRegisterCreatesUser(): void
+    public function test_register_creates_user(): void
     {
         $result = $this->service->register([
             'name' => 'New Landlord',
@@ -61,6 +129,21 @@ class LandlordAuthenticationServiceTest extends TestCase
         ]);
 
         $this->assertNotEmpty($result->plainTextToken);
-        $this->assertTrue(Hash::check('Secret!234', (string) $result->user->password));
+        $this->assertNull($result->user->fresh()?->getAttribute('password'));
+        $credential = $this->passwordCredential($result->user, 'new-landlord@example.org');
+        $this->assertNotNull($credential);
+        $this->assertTrue(Hash::check('Secret!234', (string) $credential['secret_hash']));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function passwordCredential(LandlordUser $user, string $subject): ?array
+    {
+        $credential = collect($user->fresh()?->credentials ?? [])
+            ->first(static fn (array $credential): bool => ($credential['provider'] ?? null) === 'password'
+                && ($credential['subject'] ?? null) === $subject);
+
+        return is_array($credential) ? $credential : null;
     }
 }

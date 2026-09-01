@@ -6,16 +6,19 @@ namespace App\Application\Branding;
 
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
+use Belluga\Media\Application\ModelMediaService;
+use Belluga\Media\Support\MediaModelDefinition;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Shared\Media\Application\ModelMediaService;
-use Shared\Media\Support\MediaModelDefinition;
 
 class BrandingPublicWebMediaService
 {
     private const KIND = 'default_image';
+
     private const LEGACY_FILE_BASENAME = 'default-image';
+
     private const LEGACY_PUBLIC_PATH_PREFIX = '/branding-public-web';
+
     private const CANONICAL_PUBLIC_PATH_PREFIX = '/api/v1/media/branding-public-web';
 
     public function __construct(
@@ -28,7 +31,7 @@ class BrandingPublicWebMediaService
         UploadedFile $file,
     ): string {
         return $this->modelMediaService->storeUpload(
-            baseUrl: $baseUrl,
+            baseUrl: $this->storageBaseUrl($brandable, $baseUrl),
             model: $brandable,
             kind: self::KIND,
             file: $file,
@@ -67,7 +70,9 @@ class BrandingPublicWebMediaService
             return null;
         }
 
-        return $this->normalizeLegacyStorageUrl($baseUrl, $brandable, $normalized);
+        $legacyNormalized = $this->normalizeLegacyStorageUrl($baseUrl, $brandable, $normalized);
+
+        return $legacyNormalized;
     }
 
     /**
@@ -105,7 +110,7 @@ class BrandingPublicWebMediaService
             $brandable,
             self::KIND,
             $this->definition(),
-            $baseUrl,
+            $this->storageBaseUrl($brandable, $baseUrl),
         );
 
         if ($path !== null) {
@@ -113,6 +118,42 @@ class BrandingPublicWebMediaService
         }
 
         return $this->resolveLegacyStoragePath($brandable);
+    }
+
+    /**
+     * @return array{width:string,height:string,type:string}|array{}
+     */
+    public function resolveImagePropertiesForBaseUrl(
+        Tenant|Landlord $brandable,
+        ?string $baseUrl,
+    ): array {
+        $path = $this->resolveMediaPathForBaseUrl($brandable, $baseUrl);
+        if ($path === null) {
+            return [];
+        }
+
+        $absolutePath = Storage::disk('public')->path($path);
+        if (! is_file($absolutePath)) {
+            return [];
+        }
+
+        $imageSize = @getimagesize($absolutePath);
+        if (! is_array($imageSize)) {
+            return [];
+        }
+
+        $mimeType = $imageSize['mime'] ?? null;
+        if (! is_string($mimeType) || trim($mimeType) === '') {
+            $mimeType = isset($imageSize[2]) && is_int($imageSize[2])
+                ? image_type_to_mime_type($imageSize[2])
+                : '';
+        }
+
+        return [
+            'width' => (string) ($imageSize[0] ?? ''),
+            'height' => (string) ($imageSize[1] ?? ''),
+            'type' => trim((string) $mimeType),
+        ];
     }
 
     private function normalizeLegacyStorageUrl(
@@ -137,7 +178,7 @@ class BrandingPublicWebMediaService
     private function matchesLegacyStoragePath(Tenant|Landlord $brandable, string $path): bool
     {
         foreach ($this->allowedExtensions() as $extension) {
-            $expected = '/storage/'.$this->legacyStoragePath($brandable, $extension);
+            $expected = "/storage/{$this->legacyStoragePath($brandable, $extension)}";
             if ($path === $expected) {
                 return true;
             }
@@ -177,6 +218,15 @@ class BrandingPublicWebMediaService
         $slug = trim((string) $brandable->slug);
 
         return $slug !== '' ? $slug : 'tenant';
+    }
+
+    private function storageBaseUrl(Tenant|Landlord $brandable, ?string $baseUrl): ?string
+    {
+        if ($brandable instanceof Landlord) {
+            return null;
+        }
+
+        return $baseUrl;
     }
 
     /**

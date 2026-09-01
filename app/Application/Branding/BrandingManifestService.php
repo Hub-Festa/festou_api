@@ -4,30 +4,27 @@ declare(strict_types=1);
 
 namespace App\Application\Branding;
 
+use App\Application\Media\CanonicalImageMediaService;
 use App\Application\Tenants\TenantDomainResolverService;
 use App\Models\Landlord\Landlord;
 use App\Models\Landlord\Tenant;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Intervention\Image\Laravel\Facades\Image;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class BrandingManifestService
 {
-    private const NEUTRAL_FALLBACK_COLOR = '#007D8A';
-
     public function __construct(
+        private readonly CanonicalImageMediaService $canonicalImageMediaService,
+        private readonly BrandingAssetDefinitionFactory $brandingAssetDefinitionFactory,
         private readonly TenantDomainResolverService $tenantDomainResolverService,
-    ) {
-    }
+    ) {}
 
     /**
      * @return array<string, mixed>
      */
     public function buildManifest(string $host): array
     {
-        $tenant = Tenant::current();
+        $tenant = $this->resolveTenantForHost($host);
 
         $manifest = $tenant !== null
             ? $this->buildTenantManifest($tenant)
@@ -57,139 +54,183 @@ class BrandingManifestService
 
     public function resolveLogoSetting(string $parameter, ?string $host = null): ?string
     {
-        return $this->resolveBrandingValue('logo_settings', $parameter, $host);
+        $landlordBranding = Landlord::singleton()->branding_data;
+        $tenantBranding = $this->resolveTenantForHost($host)?->branding_data ?? [];
+
+        $tenantValue = $tenantBranding['logo_settings'][$parameter] ?? null;
+
+        return $tenantValue ?: ($landlordBranding['logo_settings'][$parameter] ?? null);
     }
 
     public function resolvePwaIcon(string $parameter, ?string $host = null): ?string
     {
-        return $this->resolveBrandingValue('pwa_icon', $parameter, $host);
+        $landlordBranding = Landlord::singleton()->branding_data;
+        $tenantBranding = $this->resolveTenantForHost($host)?->branding_data ?? [];
+
+        $tenantValue = $tenantBranding['pwa_icon'][$parameter] ?? null;
+
+        return $tenantValue ?: ($landlordBranding['pwa_icon'][$parameter] ?? null);
     }
 
     public function resolveFaviconAsset(?string $host = null): ?string
     {
-        foreach ($this->brandingsForHost($host) as $branding) {
-            foreach ([
-                $branding['logo_settings']['favicon_uri'] ?? null,
-                $branding['pwa_icon']['icon192_uri'] ?? null,
-                $branding['pwa_icon']['icon512_uri'] ?? null,
-                $branding['pwa_icon']['source_uri'] ?? null,
-            ] as $candidate) {
-                if ($this->hasUsableAssetUri($candidate)) {
-                    return trim((string) $candidate);
-                }
-            }
-        }
+        $tenantBranding = $this->resolveTenantForHost($host)?->branding_data ?? [];
+        $landlordBranding = Landlord::singleton()->branding_data ?? [];
 
-        return null;
+        return $this->resolveFaviconAssetFromBranding($tenantBranding)
+            ?? $this->resolveFaviconAssetFromBranding($landlordBranding);
     }
 
     public function resolveStoragePath(?string $uri): ?string
+    {
+        return $this->resolveStoragePathForHost($uri);
+    }
+
+    public function resolveStoragePathForHost(?string $uri, ?string $host = null): ?string
     {
         if (! $uri) {
             return null;
         }
 
-        $urlPath = parse_url($uri, PHP_URL_PATH);
+        $brandables = $this->resolveBrandablesForHost($host);
 
-        return $urlPath ? Str::after($urlPath, '/storage/') : null;
-    }
-
-    public function assetResponse(?string $path, ?string $host = null): Response|BinaryFileResponse
-    {
-        $localPath = $this->resolveStoragePath($path);
-
-        if ($localPath !== null && Storage::disk('public')->exists($localPath)) {
-            return response()->file(Storage::disk('public')->path($localPath));
-        }
-
-        return $this->generatedFallbackResponse($host);
-    }
-
-    private function hasUsableAssetUri(mixed $candidate): bool
-    {
-        if (! is_string($candidate) || trim($candidate) === '') {
-            return false;
-        }
-
-        $path = $this->resolveStoragePath($candidate);
-
-        return $path !== null && Storage::disk('public')->exists($path);
-    }
-
-    private function generatedFallbackResponse(?string $host): Response
-    {
-        $image = Image::create(192, 192)->fill($this->fallbackColor($host));
-
-        return response($image->toPng()->toString(), 200, [
-            'Content-Type' => 'image/png',
-            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
-        ]);
-    }
-
-    private function fallbackColor(?string $host): string
-    {
-        foreach ($this->brandingsForHost($host) as $branding) {
-            foreach (['primary_seed_color', 'secondary_seed_color'] as $key) {
-                $color = $this->normalizeHexColor($branding['theme_data_settings'][$key] ?? null);
-                if ($color !== null && $color !== '#FFFFFF') {
-                    return $color;
+        foreach ($brandables as $brandable) {
+            foreach ($this->brandingAssetDefinitionFactory->definitions($brandable) as $definition) {
+                $resolved = $this->canonicalImageMediaService->resolveStoragePath($definition, $uri);
+                if ($resolved !== null) {
+                    return $resolved;
                 }
             }
         }
 
-        return self::NEUTRAL_FALLBACK_COLOR;
+        $urlPath = parse_url($uri, PHP_URL_PATH);
+        if (! is_string($urlPath) || $urlPath === '') {
+            return null;
+        }
+
+        $storagePath = Str::after($urlPath, '/storage/');
+
+        return $storagePath === $urlPath ? null : $storagePath;
     }
 
-    private function normalizeHexColor(mixed $value): ?string
+    public function assetResponse(?string $path, ?string $host = null)
     {
-        if (! is_string($value)) {
-            return null;
+        $localPath = $this->resolveStoragePathForHost($path, $host);
+
+        if (! $this->hasUsableAssetPath($localPath)) {
+            return response('', 404);
         }
 
-        $normalized = ltrim(trim($value), '#');
-        if (preg_match('/^[0-9a-fA-F]{3}$/', $normalized) === 1) {
-            $normalized = implode('', array_map(
-                static fn (string $character): string => $character.$character,
-                str_split($normalized),
-            ));
-        }
+        return response()->file(Storage::disk('public')->path($localPath));
+    }
 
-        if (preg_match('/^[0-9a-fA-F]{6}$/', $normalized) !== 1) {
-            return null;
-        }
-
-        return '#'.strtoupper($normalized);
+    public function hasUsableAssetUri(?string $uri): bool
+    {
+        return $this->hasUsableAssetPath($this->resolveStoragePath($uri));
     }
 
     /**
-     * @return array<int, array<string, mixed>>
+     * @param  array<string, mixed>  $branding
+     * @return array{has_dedicated_asset: bool, uses_pwa_fallback: bool}
      */
-    private function brandingsForHost(?string $host): array
+    public function resolveFaviconRouteStateFromBranding(array $branding): array
     {
-        $brandings = [];
-        $tenant = $this->resolveTenantForHost($host);
-        if ($tenant instanceof Tenant && is_array($tenant->branding_data)) {
-            $brandings[] = $tenant->branding_data;
-        }
+        $faviconUri = $branding['logo_settings']['favicon_uri'] ?? null;
+        $hasDedicatedAsset = is_string($faviconUri)
+            && trim($faviconUri) !== ''
+            && $this->hasUsableAssetUri(trim($faviconUri));
 
-        $landlordBranding = Landlord::singleton()->branding_data;
-        if (is_array($landlordBranding)) {
-            $brandings[] = $landlordBranding;
-        }
-
-        return $brandings;
+        return [
+            'has_dedicated_asset' => $hasDedicatedAsset,
+            'uses_pwa_fallback' => ! $hasDedicatedAsset
+                && $this->resolveFirstUsablePwaFaviconCandidate($branding) !== null,
+        ];
     }
 
-    private function resolveBrandingValue(string $section, string $parameter, ?string $host): ?string
+    /**
+     * @param  array<string, mixed>  $branding
+     */
+    private function resolveFaviconAssetFromBranding(array $branding): ?string
     {
-        foreach ($this->brandingsForHost($host) as $branding) {
-            $value = $branding[$section][$parameter] ?? null;
-            if (is_string($value) && trim($value) !== '') {
-                return $value;
+        $candidates = [
+            $branding['logo_settings']['favicon_uri'] ?? null,
+            $this->resolveFirstUsablePwaFaviconCandidate($branding),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate)) {
+                continue;
+            }
+
+            $normalized = trim($candidate);
+            if ($normalized !== '' && $this->hasUsableAssetUri($normalized)) {
+                return $normalized;
             }
         }
 
         return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $branding
+     */
+    private function resolveFirstUsablePwaFaviconCandidate(array $branding): ?string
+    {
+        foreach (['icon192_uri', 'icon512_uri', 'source_uri'] as $key) {
+            $candidate = $branding['pwa_icon'][$key] ?? null;
+            if (! is_string($candidate)) {
+                continue;
+            }
+
+            $normalized = trim($candidate);
+            if ($normalized !== '' && $this->hasUsableAssetUri($normalized)) {
+                return $normalized;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildTenantManifest(Tenant $tenant): array
+    {
+        return $tenant->getManifestData();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildLandlordManifest(Landlord $landlord): array
+    {
+        return $landlord->getManifestData();
+    }
+
+    private function hasUsableAssetPath(?string $path): bool
+    {
+        if ($path === null || $path === '') {
+            return false;
+        }
+
+        $disk = Storage::disk('public');
+        if (! $disk->exists($path)) {
+            return false;
+        }
+
+        return $disk->size($path) > 0;
+    }
+
+    /**
+     * @return array<int, Landlord|Tenant>
+     */
+    private function resolveBrandablesForHost(?string $host): array
+    {
+        $tenant = $this->resolveTenantForHost($host);
+
+        return $tenant instanceof Tenant
+            ? [$tenant, Landlord::singleton()]
+            : [Landlord::singleton()];
     }
 
     private function resolveTenantForHost(?string $host): ?Tenant
@@ -201,9 +242,7 @@ class BrandingManifestService
             return $currentTenant;
         }
 
-        $landlordHost = $this->normalizeHost((string) (
-            parse_url((string) config('app.url'), PHP_URL_HOST) ?: config('app.url')
-        ));
+        $landlordHost = $this->normalizeHost((string) (parse_url((string) config('app.url'), PHP_URL_HOST) ?: config('app.url')));
         if ($landlordHost !== null && $normalizedHost === $landlordHost) {
             return null;
         }
@@ -229,21 +268,5 @@ class BrandingManifestService
         $normalized = Str::lower(trim((string) $host));
 
         return $normalized === '' ? null : $normalized;
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function buildTenantManifest(Tenant $tenant): array
-    {
-        return $tenant->getManifestData();
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function buildLandlordManifest(Landlord $landlord): array
-    {
-        return $landlord->getManifestData();
     }
 }

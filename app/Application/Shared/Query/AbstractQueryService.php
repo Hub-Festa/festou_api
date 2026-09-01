@@ -15,7 +15,8 @@ abstract class AbstractQueryService
         Builder $query,
         array $queryParams,
         bool $includeArchived,
-        int $perPage
+        int $perPage,
+        ?int $page = null
     ): LengthAwarePaginator {
         if ($includeArchived) {
             $this->applyArchivedConstraint($query);
@@ -33,7 +34,7 @@ abstract class AbstractQueryService
             }
         }
 
-        return $query->paginate($perPage);
+        return $query->paginate($perPage, ['*'], 'page', $page);
     }
 
     protected function applyArchivedConstraint(Builder $query): void
@@ -50,7 +51,7 @@ abstract class AbstractQueryService
     }
 
     /**
-     * @param array<string, mixed> $filters
+     * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
     private function sanitizeFilters(array $filters): array
@@ -87,6 +88,11 @@ abstract class AbstractQueryService
     private function applyFilter(Builder $query, string $field, mixed $value): void
     {
         if (in_array($field, $this->stringFields(), true)) {
+            if (is_array($value)) {
+                $query->whereIn($field, $value);
+
+                return;
+            }
             $this->applyStringFilter($query, $field, (string) $value);
 
             return;
@@ -113,7 +119,7 @@ abstract class AbstractQueryService
 
     private function applyStringFilter(Builder $query, string $field, string $value): void
     {
-        $pattern = '%' . addcslashes($value, '%_\\') . '%';
+        $pattern = '%'.addcslashes($value, '%_\\').'%';
         $query->where($field, 'like', $pattern);
     }
 
@@ -174,7 +180,6 @@ abstract class AbstractQueryService
     }
 
     /**
-     * @param mixed $sortParam
      * @return array{field: string|null, direction: string}
      */
     private function resolveSort(mixed $sortParam): array

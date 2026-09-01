@@ -6,8 +6,8 @@ namespace App\Http\Api\v1\Controllers;
 
 use App\Application\Accounts\TenantUserManagementService;
 use App\Application\Accounts\TenantUserQueryService;
+use App\Application\Telemetry\TelemetryEmitter;
 use App\Http\Controllers\Controller;
-use App\Models\Landlord\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -16,9 +16,9 @@ class TenantUsersController extends Controller
 {
     public function __construct(
         private readonly TenantUserManagementService $tenantUserService,
-        private readonly TenantUserQueryService $tenantUserQueryService
-    ) {
-    }
+        private readonly TenantUserQueryService $tenantUserQueryService,
+        private readonly TelemetryEmitter $telemetry
+    ) {}
 
     public function index(Request $request): LengthAwarePaginator
     {
@@ -43,6 +43,18 @@ class TenantUsersController extends Controller
     {
         $this->tenantUserService->restore((string) $request->route('user_id'));
 
+        $user = $request->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_user_restored',
+                userId: (string) $user->_id,
+                properties: [
+                    'target_user_id' => (string) $request->route('user_id'),
+                ],
+                idempotencyKey: $request->header('X-Request-Id')
+            );
+        }
+
         return response()->json();
     }
 
@@ -51,6 +63,18 @@ class TenantUsersController extends Controller
         $user_id = (string) $request->route('user_id');
         $this->tenantUserService->delete($user_id);
 
+        $user = request()->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_user_deleted',
+                userId: (string) $user->_id,
+                properties: [
+                    'target_user_id' => $user_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
+
         return response()->json();
     }
 
@@ -58,6 +82,18 @@ class TenantUsersController extends Controller
     {
         $user_id = (string) $request->route('user_id');
         $this->tenantUserService->forceDelete($user_id);
+
+        $user = request()->user();
+        if ($user) {
+            $this->telemetry->emit(
+                event: 'tenant_user_force_deleted',
+                userId: (string) $user->_id,
+                properties: [
+                    'target_user_id' => $user_id,
+                ],
+                idempotencyKey: request()->header('X-Request-Id')
+            );
+        }
 
         return response()->json();
     }

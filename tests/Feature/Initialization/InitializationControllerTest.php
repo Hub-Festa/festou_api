@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Initialization;
 
+use App\Models\Landlord\Landlord;
+use App\Models\Landlord\Tenant;
 use Illuminate\Http\UploadedFile;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\TestCase;
@@ -20,33 +22,70 @@ class InitializationControllerTest extends TestCase
         $this->refreshLandlordAndTenantDatabases();
     }
 
-    protected function tearDown(): void
+    public function test_system_initializes_successfully(): void
     {
-        $this->refreshLandlordAndTenantDatabases();
-        parent::tearDown();
-    }
-
-    public function testSystemInitializesSuccessfully(): void
-    {
-        $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
-        $response = $this->postJson($initializeUrl, $this->payload());
+        $response = $this->withServerVariables([
+            'HTTP_HOST' => $this->host,
+            'SERVER_NAME' => $this->host,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ]);
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.user.name', 'Admin Test');
+        $this->assertStringContainsString(
+            '/logo-light.png',
+            (string) $response->json('data.landlord.branding_data.logo_settings.light_logo_uri')
+        );
+        $this->assertStringContainsString(
+            '/favicon.ico',
+            (string) $response->json('data.landlord.branding_data.logo_settings.favicon_uri')
+        );
+        $this->assertStringContainsString(
+            '/icon/icon-source.png',
+            (string) $response->json('data.landlord.branding_data.pwa_icon.source_uri')
+        );
+        $this->assertStringContainsString(
+            '/icon/icon-192x192.png',
+            (string) $response->json('data.landlord.branding_data.pwa_icon.icon192_uri')
+        );
 
-        $this->assertDatabaseCount('landlords', 1, 'landlord');
-        $this->assertDatabaseCount('tenants', 1, 'landlord');
+        $this->assertSame(1, Landlord::query()->count());
+        $this->assertSame(1, Tenant::query()->count());
     }
 
-    public function testSubsequentInitializationIsRejected(): void
+    public function test_subsequent_initialization_is_rejected(): void
+    {
+        $this->assertSame(0, Landlord::query()->count());
+        $this->assertSame(0, Tenant::query()->count());
+
+        $this->withServerVariables([
+            'HTTP_HOST' => $this->host,
+            'SERVER_NAME' => $this->host,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ])->assertCreated();
+
+        $response = $this->withServerVariables([
+            'HTTP_HOST' => $this->host,
+            'SERVER_NAME' => $this->host,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ]);
+        $response->assertStatus(403);
+    }
+
+    public function test_initialization_route_is_not_available_on_tenant_domain(): void
     {
         $tenantHost = "{$this->payload()['tenant']['subdomain']}.{$this->host}";
-        $initializeUrl = "http://{$tenantHost}/api/v1/initialize";
-        $this->postJson($initializeUrl, $this->payload())->assertCreated();
 
-        $response = $this->postJson($initializeUrl, $this->payload());
-        $response->assertStatus(403);
+        $response = $this->withServerVariables([
+            'HTTP_HOST' => $tenantHost,
+            'SERVER_NAME' => $tenantHost,
+        ])->post('/api/v1/initialize', $this->payload(), [
+            'Content-Type' => 'multipart/form-data',
+        ]);
+        $response->assertStatus(404);
     }
 
     /**
@@ -56,18 +95,18 @@ class InitializationControllerTest extends TestCase
     {
         return [
             'landlord' => [
-                'name' => 'Platform HQ',
+                'name' => 'Belluga HQ',
             ],
             'user' => [
                 'name' => 'Admin Test',
                 'email' => 'admin@example.org',
-                'password' => 'secret123',
+                'password' => 'LaunchSafe!246',
             ],
             'tenant' => [
-                'name' => 'Platform Tenant Test',
-                'subdomain' => 'platform-test',
+                'name' => 'Belluga Solutions Test',
+                'subdomain' => 'belluga-test',
                 'domains' => [
-                    'tenant.platform.test',
+                    'tenant.belluga.test',
                 ],
             ],
             'role' => [

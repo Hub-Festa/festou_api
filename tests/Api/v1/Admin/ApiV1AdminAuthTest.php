@@ -2,14 +2,17 @@
 
 namespace Tests\Api\v1\Admin;
 
+use App\Models\Landlord\LandlordUser;
 use App\Models\Landlord\PersonalAccessToken;
 use App\Models\Landlord\Tenant;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Testing\TestResponse;
 use MongoDB\BSON\ObjectId;
-use Tests\TestCaseAuthenticated;
 use Tests\Api\Traits\AccountAuthFunctions;
+use Tests\TestCaseAuthenticated;
 
-class ApiV1AdminAuthTest extends TestCaseAuthenticated {
+class ApiV1AdminAuthTest extends TestCaseAuthenticated
+{
     use AccountAuthFunctions;
 
     protected string $base_api_tenant {
@@ -18,81 +21,96 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         }
     }
 
-    public function testUserLoginWrongPassword(): void {
+    public function test_user_login_wrong_password(): void
+    {
 
         $response = $this->userLoginWrongPassword();
 
         $response->assertStatus(403);
 
         $response->assertJsonStructure([
-            "errors" => [
-                "credentials"
+            'errors' => [
+                'credentials',
             ],
         ]);
 
     }
 
-    public function testUserLoginWrongEmail(): void {
+    public function test_user_login_wrong_email(): void
+    {
 
         $response = $this->userLoginWrongEmail();
 
         $response->assertStatus(403);
 
         $response->assertJsonStructure([
-            "errors" => [
-                "credentials"
+            'errors' => [
+                'credentials',
             ],
         ]);
 
     }
 
-    public function testUserLoginLogoutSuccessEmail1(): void {
+    public function test_user_login_logout_success_email1(): void
+    {
 
-        $response = $this->userLoginSuccessEmail1("device1");
+        $response = $this->userLoginSuccessEmail1('device1');
 
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user",
-                "token",
+            'data' => [
+                'user',
+                'token',
             ],
         ]);
+        $this->assertPasswordCredentialForEmail(
+            $this->landlord->user_cross_tenant_admin->user_id,
+            $this->landlord->user_cross_tenant_admin->email_1,
+            $this->landlord->user_cross_tenant_admin->password
+        );
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
 
-        $response = $this->userLogout("device1");
+        $response = $this->userLogout('device1');
 
         $response->assertStatus(200);
 
-        $this->landlord->user_cross_tenant_admin->token = "";
+        $this->landlord->user_cross_tenant_admin->token = '';
     }
 
-    public function testUserLoginLogoutSuccessEmail2(): void {
+    public function test_user_login_logout_success_email2(): void
+    {
 
         $this->ensureSecondaryEmailRegistered();
 
-        $response = $this->userLoginSuccessEmail2("device1");
+        $response = $this->userLoginSuccessEmail2('device1');
 
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user",
-                "token",
+            'data' => [
+                'user',
+                'token',
             ],
         ]);
+        $this->assertPasswordCredentialForEmail(
+            $this->landlord->user_cross_tenant_admin->user_id,
+            $this->landlord->user_cross_tenant_admin->email_2,
+            $this->landlord->user_cross_tenant_admin->password
+        );
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
 
-        $response = $this->userLogout("device1");
+        $response = $this->userLogout('device1');
 
         $response->assertStatus(200);
 
-        $this->landlord->user_cross_tenant_admin->token = "";
+        $this->landlord->user_cross_tenant_admin->token = '';
     }
 
-    public function testUserLoginLogoutManyDevicesSuccess(): void {
+    public function test_user_login_logout_many_devices_success(): void
+    {
 
         $tokenableId = $this->landlord->user_cross_tenant_admin->user_id;
         PersonalAccessToken::query()
@@ -100,11 +118,11 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
             ->orWhere('tokenable_id', new ObjectId($tokenableId))
             ->delete();
 
-        $response = $this->userLoginSuccessEmail1("device1");
+        $response = $this->userLoginSuccessEmail1('device1');
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
 
-        $this->userLoginSuccessEmail1("device2");
+        $this->userLoginSuccessEmail1('device2');
 
         $count = PersonalAccessToken::query()
             ->where('tokenable_id', $tokenableId)
@@ -117,44 +135,48 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
 
         $response->assertStatus(200);
 
-        $response = $this->userLoginSuccessEmail1("default");
+        $response = $this->userLoginSuccessEmail1('default');
 
         $this->landlord->user_cross_tenant_admin->token = $response->json()['data']['token'];
     }
 
-    public function testLoginWithToken(): void {
+    public function test_login_with_token(): void
+    {
         $response = $this->userLoginWithToken($this->landlord->user_superadmin->token);
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user"
-            ]
+            'data' => [
+                'user',
+            ],
         ]);
 
         $response = $this->userLoginWithToken($this->landlord->user_cross_tenant_admin->token);
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "user"
-            ]
+            'data' => [
+                'user',
+            ],
         ]);
     }
 
-    public function testLoginWithTokenError(): void {
-        $response = $this->userLoginWithToken("123");
+    public function test_login_with_token_error(): void
+    {
+        $response = $this->userLoginWithToken('123');
         $response->assertStatus(401);
     }
 
-    public function testAdminTokenValidateRejectsTenantToken(): void
+    public function test_admin_token_validate_rejects_tenant_token(): void
     {
         $email = fake()->unique()->safeEmail();
         $password = 'SecurePass!123';
 
-        $tenantBase = "http://{$this->landlord->tenant_primary->subdomain}.{$this->host}/api/v1/";
-        $tenantDomain = 'tenant.platform.test';
-        Tenant::query()->first()?->makeCurrent();
+        $tenant = $this->canonicalTenant();
+        $tenantBase = "http://{$tenant->subdomain}.{$this->host}/api/v1/";
+        $tenantDomain = 'tenant.belluga.test';
+        $tenant->makeCurrent();
+        $this->setTenantPublicAuthFixture(['password'], tenant: $tenant);
 
         $this->json(
             method: 'post',
@@ -187,25 +209,25 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
 
         $response = $this->json(
             method: 'get',
-            uri: "admin/api/v1/auth/token_validate",
+            uri: 'admin/api/v1/auth/token_validate',
             headers: [
                 'Authorization' => "Bearer $tenantToken",
-                'Content-Type' => 'application/json'
+                'Content-Type' => 'application/json',
             ]
         );
 
         $response->assertStatus(401);
     }
 
-    public function testAdminLoginRejectsPasswordExceedingMaxLength(): void
+    public function test_admin_login_rejects_password_exceeding_max_length(): void
     {
         $response = $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: 'admin/api/v1/auth/login',
             data: [
-                "email" => $this->landlord->user_cross_tenant_admin->email_1,
-                "password" => str_repeat('A', 33),
-                "device_name" => 'max-length-check',
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => str_repeat('A', 33),
+                'device_name' => 'max-length-check',
             ]
         );
 
@@ -213,15 +235,15 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         $response->assertJsonPath('errors.password.0', 'The password field must not be greater than 32 characters.');
     }
 
-    public function testAdminLoginRejectsDeviceNameExceedingMaxLength(): void
+    public function test_admin_login_rejects_device_name_exceeding_max_length(): void
     {
         $response = $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: 'admin/api/v1/auth/login',
             data: [
-                "email" => $this->landlord->user_cross_tenant_admin->email_1,
-                "password" => $this->landlord->user_cross_tenant_admin->password,
-                "device_name" => str_repeat('d', 300),
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => $this->landlord->user_cross_tenant_admin->password,
+                'device_name' => str_repeat('d', 300),
             ]
         );
 
@@ -229,30 +251,228 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         $response->assertJsonPath('errors.device_name.0', 'The device name field must not be greater than 255 characters.');
     }
 
-    protected function userLoginWithToken(string $token): TestResponse {
+    public function test_admin_login_works_on_tenant_subdomain(): void
+    {
+        $tenantHost = $this->canonicalTenantHost();
+
+        $login = $this->json(
+            method: 'post',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/login",
+            data: [
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => $this->landlord->user_cross_tenant_admin->password,
+                'device_name' => 'tenant-subdomain-login-check',
+            ]
+        );
+
+        $login->assertStatus(200);
+        $login->assertJsonStructure([
+            'data' => [
+                'user',
+                'token',
+            ],
+        ]);
+
+        $token = $login->json('data.token');
+        $this->assertIsString($token);
+        $this->assertNotSame('', $token);
+
+        $validate = $this->json(
+            method: 'get',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/token_validate",
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ]
+        );
+
+        $validate->assertStatus(200);
+        $validate->assertJsonStructure([
+            'data' => [
+                'user',
+            ],
+        ]);
+
+        $me = $this->json(
+            method: 'get',
+            uri: "http://{$tenantHost}/admin/api/v1/me",
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ]
+        );
+
+        $me->assertStatus(200);
+        $me->assertJsonStructure([
+            'data' => [
+                'user_id',
+            ],
+        ]);
+    }
+
+    public function test_admin_tenant_subdomain_token_can_patch_map_ui_settings_namespace(): void
+    {
+        $tenant = $this->canonicalTenant();
+        $tenantHost = "{$tenant->subdomain}.{$this->host}";
+        $tenantId = (string) $tenant->_id;
+
+        $crossAdmin = LandlordUser::query()->find($this->landlord->user_cross_tenant_admin->user_id);
+        $this->assertNotNull($crossAdmin);
+
+        $crossAdmin->tenant_roles = [[
+            'name' => 'Tenant Admin',
+            'slug' => 'tenant-admin',
+            'permissions' => ['*'],
+            'tenant_id' => $tenantId,
+        ]];
+        $crossAdmin->save();
+
+        $login = $this->json(
+            method: 'post',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/login",
+            data: [
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => $this->landlord->user_cross_tenant_admin->password,
+                'device_name' => 'tenant-subdomain-map-ui-settings-patch',
+            ]
+        );
+
+        $login->assertStatus(200);
+        $token = (string) $login->json('data.token');
+        $this->assertNotSame('', $token);
+
+        $patch = $this->json(
+            method: 'patch',
+            uri: "http://{$tenantHost}/admin/api/v1/settings/values/map_ui",
+            data: [
+                'default_origin.lat' => -20.611121,
+                'default_origin.lng' => -40.498617,
+                'default_origin.label' => 'Praia do Morro',
+            ],
+            headers: [
+                'Authorization' => "Bearer {$token}",
+                'Content-Type' => 'application/json',
+            ]
+        );
+
+        $patch->assertStatus(200);
+        $patch->assertJsonPath('data.default_origin.lat', -20.611121);
+        $patch->assertJsonPath('data.default_origin.lng', -40.498617);
+        $patch->assertJsonPath('data.default_origin.label', 'Praia do Morro');
+    }
+
+    public function test_landlord_tenant_telemetry_endpoints_reject_tenant_outside_operator_access_scope(): void
+    {
+        $primaryTenant = $this->canonicalTenant();
+
+        $targetTenant = Tenant::query()
+            ->where('slug', 'telemetry-bypass-target')
+            ->first();
+        if (! $targetTenant) {
+            $targetTenant = Tenant::create([
+                'name' => 'Telemetry Bypass Target',
+                'subdomain' => 'telemetry-bypass-target',
+                'app_domains' => ['com.telemetry.bypass.target'],
+            ]);
+        }
+
+        $crossAdmin = LandlordUser::query()->find($this->landlord->user_cross_tenant_admin->user_id);
+        $this->assertNotNull($crossAdmin);
+
+        $crossAdmin->tenant_roles = [[
+            'name' => 'Tenant Admin',
+            'slug' => 'tenant-admin',
+            'permissions' => ['telemetry-settings:update'],
+            'tenant_id' => (string) $primaryTenant->_id,
+        ]];
+        $crossAdmin->save();
+
+        $token = $crossAdmin->createToken(
+            'telemetry-access-scope-test',
+            ['telemetry-settings:update']
+        )->plainTextToken;
+
+        $headers = [
+            'Authorization' => "Bearer {$token}",
+            'Content-Type' => 'application/json',
+        ];
+
+        $indexResponse = $this->json(
+            method: 'get',
+            uri: "admin/api/v1/{$targetTenant->slug}/settings/telemetry",
+            headers: $headers,
+        );
+        $indexResponse->assertStatus(404);
+
+        $storeResponse = $this->json(
+            method: 'post',
+            uri: "admin/api/v1/{$targetTenant->slug}/settings/telemetry",
+            data: [
+                'type' => 'mixpanel',
+                'token' => 'mixpanel-token',
+                'track_all' => true,
+            ],
+            headers: $headers,
+        );
+        $storeResponse->assertStatus(404);
+
+        $destroyResponse = $this->json(
+            method: 'delete',
+            uri: "admin/api/v1/{$targetTenant->slug}/settings/telemetry/mixpanel",
+            headers: $headers,
+        );
+        $destroyResponse->assertStatus(404);
+    }
+
+    public function test_admin_login_wrong_password_on_tenant_subdomain_returns_credentials_error(): void
+    {
+        $tenantHost = $this->canonicalTenantHost();
+
+        $response = $this->json(
+            method: 'post',
+            uri: "http://{$tenantHost}/admin/api/v1/auth/login",
+            data: [
+                'email' => $this->landlord->user_cross_tenant_admin->email_1,
+                'password' => 'invalid-password',
+                'device_name' => 'tenant-subdomain-invalid-password',
+            ]
+        );
+
+        $response->assertStatus(403);
+        $response->assertJsonStructure([
+            'errors' => [
+                'credentials',
+            ],
+        ]);
+    }
+
+    protected function userLoginWithToken(string $token): TestResponse
+    {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/auth/token_validate",
+            uri: 'admin/api/v1/auth/token_validate',
             headers: [
                 'Authorization' => "Bearer $token",
-                'Content-Type' => 'application/json'
+                'Content-Type' => 'application/json',
             ]
         );
     }
 
-    protected function userLogout(?string $device = null, ?bool $all_devices = null): TestResponse {
+    protected function userLogout(?string $device = null, ?bool $all_devices = null): TestResponse
+    {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/logout",
+            uri: 'admin/api/v1/auth/logout',
             data: $this->payloadUserLogout($device, $all_devices),
             headers: [
                 'Authorization' => "Bearer {$this->landlord->user_cross_tenant_admin->token}",
-                'Content-Type' => 'application/json'
+                'Content-Type' => 'application/json',
             ]
         );
     }
 
-    public function testLandlordAnonymousIdentityEndpointNotAvailable(): void {
+    public function test_landlord_anonymous_identity_endpoint_not_available(): void
+    {
         $response = $this->json(
             method: 'post',
             uri: 'admin/api/v1/anonymous/identities',
@@ -268,69 +488,77 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         $this->assertEquals(404, $response->status());
     }
 
-    protected function userLoginWrongPassword(): TestResponse {
+    protected function userLoginWrongPassword(): TestResponse
+    {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: 'admin/api/v1/auth/login',
             data: $this->payloadUserLoginWrongPassword()
         );
     }
 
-    protected function userLoginWrongEmail(): TestResponse {
+    protected function userLoginWrongEmail(): TestResponse
+    {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: 'admin/api/v1/auth/login',
             data: $this->payloadUserLoginWrongPassword()
         );
     }
 
-    protected function userLoginSuccessEmail1(string $device): TestResponse {
+    protected function userLoginSuccessEmail1(string $device): TestResponse
+    {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: 'admin/api/v1/auth/login',
             data: $this->payloadUserLoginSuccessEmail1($device)
         );
     }
 
-    protected function userLoginSuccessEmail2(string $device): TestResponse {
+    protected function userLoginSuccessEmail2(string $device): TestResponse
+    {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/auth/login",
+            uri: 'admin/api/v1/auth/login',
             data: $this->payloadUserLoginSuccessEmail2($device)
         );
     }
 
-    protected function payloadUserLogout(?string $device, ?bool $all_devices): array {
+    protected function payloadUserLogout(?string $device, ?bool $all_devices): array
+    {
 
         $return = [];
         if ($device !== null) {
-            $return["device"] = $device;
+            $return['device'] = $device;
         }
 
-        if($all_devices !== null) {
-            $return["all_devices"] = $all_devices;
+        if ($all_devices !== null) {
+            $return['all_devices'] = $all_devices;
         }
 
         return $return;
     }
 
-    protected function payloadUserLoginSuccessEmail1(String $device): array {
+    protected function payloadUserLoginSuccessEmail1(string $device): array
+    {
         return [
-            "email" => $this->landlord->user_cross_tenant_admin->email_1,
-            "password" => $this->landlord->user_cross_tenant_admin->password,
-            "device_name" => $device
+            'email' => $this->landlord->user_cross_tenant_admin->email_1,
+            'password' => $this->landlord->user_cross_tenant_admin->password,
+            'device_name' => $device,
         ];
     }
 
-    protected function payloadUserLoginSuccessEmail2(String $device): array {
+    protected function payloadUserLoginSuccessEmail2(string $device): array
+    {
         return [
-            "email" => $this->landlord->user_cross_tenant_admin->email_2,
-            "password" => $this->landlord->user_cross_tenant_admin->password,
-            "device_name" => $device
+            'email' => $this->landlord->user_cross_tenant_admin->email_2,
+            'password' => $this->landlord->user_cross_tenant_admin->password,
+            'device_name' => $device,
         ];
     }
 
-    protected function ensureSecondaryEmailRegistered(): void {
+    protected function ensureSecondaryEmailRegistered(): void
+    {
         if (empty($this->landlord->user_cross_tenant_admin->email_2)) {
             $this->landlord->user_cross_tenant_admin->email_2 = fake()->unique()->safeEmail();
         }
@@ -344,16 +572,16 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         $currentEmails = array_map('strtolower', $login->json('data.user.emails') ?? []);
         $desiredEmail = strtolower($this->landlord->user_cross_tenant_admin->email_2);
 
-        if (!in_array($desiredEmail, $currentEmails, true)) {
+        if (! in_array($desiredEmail, $currentEmails, true)) {
             $response = $this->json(
                 method: 'patch',
-                uri: "admin/api/v1/profile/emails",
+                uri: 'admin/api/v1/profile/emails',
                 data: [
                     'email' => $this->landlord->user_cross_tenant_admin->email_2,
                 ],
                 headers: [
                     'Authorization' => "Bearer {$this->landlord->user_cross_tenant_admin->token}",
-                    'Content-Type' => 'application/json'
+                    'Content-Type' => 'application/json',
                 ]
             );
 
@@ -361,22 +589,61 @@ class ApiV1AdminAuthTest extends TestCaseAuthenticated {
         }
 
         $this->userLogout($deviceName)->assertStatus(200);
-        $this->landlord->user_cross_tenant_admin->token = "";
+        $this->landlord->user_cross_tenant_admin->token = '';
     }
 
-    protected function payloadUserLoginWrongPassword(): array {
+    private function assertPasswordCredentialForEmail(string $userId, string $email, string $plainPassword): void
+    {
+        $user = LandlordUser::query()->find($userId);
+
+        $this->assertNotNull($user);
+        $this->assertNull($user->getAttribute('password'));
+        $this->assertNull($user->getAttribute('password_type'));
+
+        $credential = collect($user->credentials ?? [])
+            ->first(static fn (array $credential): bool => ($credential['provider'] ?? null) === 'password'
+                && ($credential['subject'] ?? null) === strtolower($email));
+
+        $this->assertIsArray($credential);
+        $this->assertTrue(Hash::check($plainPassword, (string) $credential['secret_hash']));
+    }
+
+    private function canonicalTenant(): Tenant
+    {
+        $tenant = $this->resolveCanonicalTenant(
+            $this->landlord->tenant_primary,
+            allowSingleTenantContext: true
+        );
+
+        $this->landlord->tenant_primary->id = (string) $tenant->_id;
+        $this->landlord->tenant_primary->slug = (string) $tenant->slug;
+        $this->landlord->tenant_primary->subdomain = (string) $tenant->subdomain;
+
+        return $tenant;
+    }
+
+    private function canonicalTenantHost(): string
+    {
+        $tenant = $this->canonicalTenant();
+
+        return "{$tenant->subdomain}.{$this->host}";
+    }
+
+    protected function payloadUserLoginWrongPassword(): array
+    {
         return [
-            "email" => $this->landlord->user_cross_tenant_admin->email_1,
-            "password" => fake()->password(8),
-            "device_name" => "test"
+            'email' => $this->landlord->user_cross_tenant_admin->email_1,
+            'password' => fake()->password(8),
+            'device_name' => 'test',
         ];
     }
 
-    protected function payloadUserLoginWrongEmail(): array {
+    protected function payloadUserLoginWrongEmail(): array
+    {
         return [
-            "email" => fake()->email(),
-            "password" => $this->landlord->user_cross_tenant_admin->password,
-            "device_name" => "test"
+            'email' => fake()->email(),
+            'password' => $this->landlord->user_cross_tenant_admin->password,
+            'device_name' => 'test',
         ];
     }
 }

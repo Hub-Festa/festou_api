@@ -24,12 +24,6 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         'MONGODB_QUEUE_COLLECTION',
         'MONGODB_QUEUE',
         'MONGODB_QUEUE_RETRY_AFTER',
-        'CACHE_STORE',
-        'CACHE_LIMITER',
-        'DB_CACHE_CONNECTION',
-        'DB_CACHE_COLLECTION',
-        'DB_CACHE_LOCK_CONNECTION',
-        'DB_CACHE_LOCK_COLLECTION',
         'LOG_STACK',
         'LOG_LEVEL',
         'LOG_DAILY_DAYS',
@@ -140,39 +134,6 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         $this->assertSame('database', $config['default']);
     }
 
-    public function test_cache_defaults_to_shared_mongodb_and_disables_relational_store(): void
-    {
-        $config = $this->loadCacheConfig();
-
-        $this->assertSame('mongodb', $config['default']);
-        $this->assertSame('mongodb', $config['limiter']);
-        $this->assertNull($config['stores']['database']);
-        $this->assertSame('mongodb', $config['stores']['mongodb']['driver']);
-        $this->assertSame('mongodb', $config['stores']['mongodb']['connection']);
-        $this->assertSame('cache', $config['stores']['mongodb']['collection']);
-        $this->assertSame('mongodb', $config['stores']['mongodb']['lock_connection']);
-        $this->assertSame('cache_locks', $config['stores']['mongodb']['lock_collection']);
-    }
-
-    public function test_cache_preserves_explicit_mongodb_connections_and_collections(): void
-    {
-        $this->setEnv('CACHE_STORE', 'mongodb');
-        $this->setEnv('CACHE_LIMITER', 'mongodb');
-        $this->setEnv('DB_CACHE_CONNECTION', 'shared_cache');
-        $this->setEnv('DB_CACHE_COLLECTION', 'application_cache');
-        $this->setEnv('DB_CACHE_LOCK_CONNECTION', 'shared_locks');
-        $this->setEnv('DB_CACHE_LOCK_COLLECTION', 'application_cache_locks');
-
-        $config = $this->loadCacheConfig();
-
-        $this->assertSame('mongodb', $config['default']);
-        $this->assertSame('mongodb', $config['limiter']);
-        $this->assertSame('shared_cache', $config['stores']['mongodb']['connection']);
-        $this->assertSame('application_cache', $config['stores']['mongodb']['collection']);
-        $this->assertSame('shared_locks', $config['stores']['mongodb']['lock_connection']);
-        $this->assertSame('application_cache_locks', $config['stores']['mongodb']['lock_collection']);
-    }
-
     public function test_worker_entrypoint_consumes_explicit_otp_queue_before_default_queue(): void
     {
         $entrypointPath = dirname(__DIR__, 3).'/scripts/run_queue_worker.sh';
@@ -225,26 +186,6 @@ class QueueAndLoggingConfigGuardrailTest extends TestCase
         Container::setInstance($container);
 
         return require __DIR__.'/../../../config/logging.php';
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function loadCacheConfig(): array
-    {
-        $container = new class extends Container
-        {
-            public function storagePath($path = ''): string
-            {
-                $storage = __DIR__.'/../../../storage';
-
-                return $path !== '' ? $storage.DIRECTORY_SEPARATOR.$path : $storage;
-            }
-        };
-
-        Container::setInstance($container);
-
-        return require __DIR__.'/../../../config/cache.php';
     }
 
     private function setEnv(string $key, string $value): void

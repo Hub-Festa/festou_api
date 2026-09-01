@@ -4,25 +4,74 @@ declare(strict_types=1);
 
 namespace App\Application\Profiles;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\AccountProfiles\AccountProfileManagementService;
+use App\Application\AccountProfiles\AccountProfileMediaService;
+use App\Application\Auth\PasswordResetFlowService;
+use App\Models\Landlord\Tenant;
+use App\Models\Tenants\AccountProfile;
 use App\Models\Tenants\AccountUser;
 use App\Support\Helpers\PhoneNumberParser;
 use Illuminate\Http\Exceptions\HttpResponseException;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 
 class TenantProfileService
 {
-    public function updateProfile(AccountUser $user, array $attributes): AccountUser
+    public function __construct(
+        private readonly AccountProfileBootstrapService $profileBootstrapper,
+        private readonly AccountProfileManagementService $profileManagementService,
+        private readonly AccountProfileMediaService $profileMediaService,
+        private readonly PasswordResetFlowService $passwordResetFlowService,
+    ) {}
+
+    public function updateProfile(AccountUser $user, array $attributes, Request $request): AccountUser
     {
-        if ($attributes === []) {
+        if (array_key_exists('avatar_url', $attributes)) {
+            throw ValidationException::withMessages([
+                'avatar_url' => 'Avatar URLs are managed by the profile media flow.',
+            ]);
+        }
+
+        $hasAvatarMutation = $request->hasFile('avatar')
+            || $request->boolean('remove_avatar');
+
+        if ($attributes === [] && ! $hasAvatarMutation) {
             throw ValidationException::withMessages([
                 'empty' => 'Nenhum dado recebido para atualizar.',
             ]);
         }
 
-        $user->fill($attributes);
-        $user->save();
+        $userAttributes = [];
+        if (array_key_exists('name', $attributes)) {
+            $userAttributes['name'] = $attributes['name'];
+        }
+        if (array_key_exists('timezone', $attributes)) {
+            $userAttributes['timezone'] = $attributes['timezone'];
+        }
+
+        if ($userAttributes !== []) {
+            $user->fill($userAttributes);
+            $user->save();
+        }
+
+        $profileAttributes = [];
+        if (array_key_exists('name', $attributes)) {
+            $profileAttributes['display_name'] = $attributes['name'];
+        }
+        if (array_key_exists('bio', $attributes)) {
+            $profileAttributes['bio'] = $attributes['bio'];
+        }
+        if ($profileAttributes !== [] || $hasAvatarMutation) {
+            $profile = $this->ensurePersonalProfile($user);
+            if ($profileAttributes !== []) {
+                $profileAttributes['updated_by'] = (string) $user->_id;
+                $profileAttributes['updated_by_type'] = 'tenant';
+                $profile = $this->profileManagementService->update($profile, $profileAttributes);
+            }
+            $this->profileMediaService->applyUploads($request, $profile);
+        }
 
         return $user->fresh();
     }
@@ -36,45 +85,33 @@ class TenantProfileService
 
     public function sendResetToken(string $email): void
     {
-        $token = $this->generateNumericToken();
-
         $user = $this->findByEmail($email);
 
-        if ($user) {
-            DB::connection('landlord')
-                ->table('password_reset_tokens')
-                ->insert([
-                    'user_id' => $user->id,
-                    'token' => $token,
-                ]);
-        }
+        $this->passwordResetFlowService->issue(
+            email: $email,
+            broker: \App\Application\Auth\PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: $this->tenantScope(),
+            user: $user,
+            userIdResolver: static fn (AccountUser $resolvedUser): mixed => $resolvedUser->id,
+        );
     }
 
     public function resetPassword(string $email, string $token, string $password): void
     {
         $user = $this->findByEmail($email);
 
-        if (! $user) {
-            throw ValidationException::withMessages([
-                'reset_token' => 'Invalid token',
-            ]);
-        }
-
-        $record = DB::connection('landlord')
-            ->table('password_reset_tokens')
-            ->where('token', $token)
-            ->where('user_id', $user->id)
-            ->first();
-
-        if (! $record) {
-            throw ValidationException::withMessages([
-                'reset_token' => 'Invalid token',
-            ]);
-        }
-
-        $user->password = Hash::make($password);
-        $user->password_type = 'laravel';
-        $user->save();
+        $this->passwordResetFlowService->reset(
+            email: $email,
+            token: $token,
+            password: $password,
+            broker: \App\Application\Auth\PasswordResetTokenService::TENANT_USERS_BROKER,
+            scope: $this->tenantScope(),
+            user: $user,
+            userIdResolver: static fn (AccountUser $resolvedUser): mixed => $resolvedUser->id,
+            applyReset: function (AccountUser $resolvedUser, string $newPassword): void {
+                $this->applyResetPassword($resolvedUser, $newPassword);
+            },
+        );
     }
 
     public function addEmail(AccountUser $user, string $email): AccountUser
@@ -126,7 +163,7 @@ class TenantProfileService
     }
 
     /**
-     * @param array<int, string> $phones
+     * @param  array<int, string>  $phones
      */
     public function addPhones(AccountUser $user, array $phones): AccountUser
     {
@@ -190,11 +227,6 @@ class TenantProfileService
         return $user->fresh();
     }
 
-    private function generateNumericToken(): string
-    {
-        return str_pad((string) random_int(0, 999_999), 6, '0', STR_PAD_LEFT);
-    }
-
     private function findByEmail(string $email): ?AccountUser
     {
         return AccountUser::query()
@@ -202,8 +234,21 @@ class TenantProfileService
             ->first();
     }
 
+    private function tenantScope(): string
+    {
+        return trim((string) Tenant::resolve()->getKey());
+    }
+
+    protected function applyResetPassword(AccountUser $user, string $password): void
+    {
+        $user->password = Hash::make($password);
+        $user->password_type = 'laravel';
+        $user->save();
+        $user->tokens()->delete();
+    }
+
     /**
-     * @param array<int, string> $phones
+     * @param  array<int, string>  $phones
      * @return array<int, string>
      */
     private function parsePhones(array $phones): array
@@ -226,7 +271,7 @@ class TenantProfileService
     }
 
     /**
-     * @param array<string, array<int, string>> $errors
+     * @param  array<string, array<int, string>>  $errors
      */
     private function fail(string $message, array $errors): never
     {
@@ -234,5 +279,27 @@ class TenantProfileService
             'message' => $message,
             'errors' => $errors,
         ], 422));
+    }
+
+    private function ensurePersonalProfile(AccountUser $user): AccountProfile
+    {
+        $this->profileBootstrapper->ensurePersonalAccount($user);
+
+        /** @var AccountProfile|null $profile */
+        $profile = AccountProfile::query()
+            ->where('created_by', (string) $user->_id)
+            ->where('created_by_type', 'tenant')
+            ->where('profile_type', 'personal')
+            ->where('deleted_at', null)
+            ->orderBy('_id')
+            ->first();
+
+        if (! $profile instanceof AccountProfile) {
+            throw ValidationException::withMessages([
+                'profile' => ['Perfil pessoal não encontrado para o usuário autenticado.'],
+            ]);
+        }
+
+        return $profile;
     }
 }

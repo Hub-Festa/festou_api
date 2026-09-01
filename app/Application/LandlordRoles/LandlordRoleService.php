@@ -32,7 +32,7 @@ class LandlordRoleService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function create(array $data): LandlordRole
     {
@@ -40,7 +40,7 @@ class LandlordRoleService
     }
 
     /**
-     * @param array<string, mixed> $data
+     * @param  array<string, mixed>  $data
      */
     public function update(LandlordRole $role, array $data): LandlordRole
     {
@@ -119,13 +119,13 @@ class LandlordRoleService
     }
 
     /**
-     * @param array<int, string> $current
-     * @param array<string, array<int, string>>|array<int, string> $mutation
+     * @param  array<int, string>  $current
+     * @param  array<string, array<int, string>>|array<int, string>  $mutation
      * @return array<int, string>
      */
     private function applyPermissionMutation(array $current, array $mutation): array
     {
-        // Support simple replacement when the mutation arrives as a flat array
+        // Support simple replacement (legacy behaviour) when mutation is a flat array
         if ($this->isFlatArray($mutation)) {
             return array_values(array_unique($mutation));
         }

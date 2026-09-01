@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
-         bootstrap="vendor/autoload.php"
+         bootstrap="tests/bootstrap.php"
          stopOnFailure="true"
          colors="true"
 >
@@ -15,14 +15,38 @@
         <testsuite name="Feature-Accounts">
             <directory>tests/Feature/Accounts</directory>
         </testsuite>
+        <testsuite name="Feature-AccountProfiles">
+            <directory>tests/Feature/AccountProfiles</directory>
+        </testsuite>
+        <testsuite name="Feature-Events">
+            <directory>tests/Feature/Events</directory>
+        </testsuite>
+        <testsuite name="Feature-Map">
+            <directory>tests/Feature/Map</directory>
+        </testsuite>
+        <testsuite name="Feature-StaticAssets">
+            <directory>tests/Feature/StaticAssets</directory>
+        </testsuite>
+        <testsuite name="Feature-Taxonomies">
+            <directory>tests/Feature/Taxonomies</directory>
+        </testsuite>
         <testsuite name="Feature-Tenants">
             <directory>tests/Feature/Tenants</directory>
+        </testsuite>
+        <testsuite name="Feature-Security">
+            <directory>tests/Feature/Security</directory>
         </testsuite>
         <testsuite name="Feature-Push">
             <directory>tests/Feature/Push</directory>
         </testsuite>
+        <testsuite name="Feature-Profile">
+            <directory>tests/Feature/Profile</directory>
+        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Package-ContactChannels">
+            <directory>packages/belluga/belluga_contact_channels/tests</directory>
         </testsuite>
         <testsuite name="Initialization">
             <file>tests/Api/v1/Initialization/ApiV1InitializeTest.php</file>
@@ -42,6 +66,7 @@
             <directory>tests/Api/v1/Tenants/Account</directory>
             <directory>tests/Api/v1/Tenants/Branding</directory>
             <directory>tests/Api/v1/Tenants/Auth</directory>
+            <directory>tests/Api/v1/Tenants/Media</directory>
         </testsuite>
         <testsuite name="Api-v1-Account">
             <directory>tests/Api/v1/Accounts/Roles</directory>
@@ -62,21 +87,23 @@
         </include>
     </source>
     <php>
+        <ini name="memory_limit" value="1024M"/>
         <env name="APP_ENV" value="testing"/>
         <env name="APP_URL" value="http://nginx" />
         <env name="APP_HOST" value="nginx" />
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DEEP_LINK_ROUTE_POLICY_CONFIG_FILE" value="tests/Fixtures/DeepLinks/project_deep_link_route_policy_belluga.php"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
-        <env name="PUBLIC_WEB_PROJECT_ROUTE_CONFIG_FILE" value="tests/Fixtures/PublicWeb/project_public_shell_routes.php"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="DB_URI" value="mongodb://mongo:27017/landlord_test?replicaSet=rs0" />
         <env name="DB_DATABASE" value="landlord_test" />
+        <env name="DB_URI_LANDLORD" value="mongodb://mongo:27017/landlord_test?replicaSet=rs0" />
         <env name="DB_DATABASE_LANDLORD" value="landlord_test" />
+        <env name="DB_URI_TENANTS" value="mongodb://mongo:27017/tenants_test?replicaSet=rs0" />
         <env name="DB_DATABASE_TENANTS" value="tenants_test" />
     </php>
 </phpunit>

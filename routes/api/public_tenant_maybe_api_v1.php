@@ -2,21 +2,20 @@
 
 use App\Http\Api\v1\Controllers\AnonymousIdentityController;
 use App\Http\Api\v1\Controllers\AuthControllerAccount;
-use App\Http\Api\v1\Controllers\BrandingPublicWebMediaController;
 use App\Http\Api\v1\Controllers\EnvironmentController;
 use App\Http\Api\v1\Controllers\MeController;
 use App\Http\Api\v1\Controllers\PasswordRegistrationController;
 use App\Http\Api\v1\Controllers\ProfileControllerTenant;
+use App\Http\Api\v1\Controllers\TenantTelemetrySettingsController;
 use App\Http\Middleware\CheckTenantAccess;
+use App\Http\Middleware\EnsureTenantPublicAuthMethod;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Spatie\Multitenancy\Http\Middleware\NeedsTenant;
 
-Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData']);
-
-Route::middleware('tenant')->group(function () {
-    Route::get(
-        '/media/branding-public-web/{branding_subject_id}/default_image',
-        [BrandingPublicWebMediaController::class, 'defaultImage']
-    );
+Route::middleware(NeedsTenant::class)->group(function () {
+    Route::get('/environment', [EnvironmentController::class, 'showEnvironmentData'])
+        ->withoutMiddleware(StartSession::class);
 
     Route::prefix('anonymous')
         ->group(function () {
@@ -29,7 +28,8 @@ Route::middleware('tenant')->group(function () {
     Route::prefix('profile')
         ->middleware(['auth:sanctum', CheckTenantAccess::class])
         ->group(function () {
-            Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword']);
+            Route::patch('/password', [ProfileControllerTenant::class, 'updatePassword'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
             Route::patch('/', [ProfileControllerTenant::class, 'updateProfile']);
 
@@ -44,13 +44,17 @@ Route::middleware('tenant')->group(function () {
 
     Route::prefix('auth')
         ->group(function () {
-            Route::post('/login', [AuthControllerAccount::class, 'login']);
+            Route::post('/login', [AuthControllerAccount::class, 'login'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
-            Route::post('/register/password', PasswordRegistrationController::class);
+            Route::post('/register/password', PasswordRegistrationController::class)
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
-            Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken']);
+            Route::post('/password_token', [ProfileControllerTenant::class, 'generateToken'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
-            Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword']);
+            Route::post('/password_reset', [ProfileControllerTenant::class, 'resetPassword'])
+                ->middleware(EnsureTenantPublicAuthMethod::class.':password');
 
             Route::middleware(['auth:sanctum', CheckTenantAccess::class])
                 ->group(function () {
@@ -58,5 +62,16 @@ Route::middleware('tenant')->group(function () {
 
                     Route::get('/token_validate', [AuthControllerAccount::class, 'loginByToken']);
                 });
+        });
+
+    Route::prefix('settings')
+        ->middleware(['auth:sanctum', CheckTenantAccess::class])
+        ->group(function () {
+            Route::get('/telemetry', [TenantTelemetrySettingsController::class, 'index'])
+                ->middleware('abilities:telemetry-settings:update');
+            Route::post('/telemetry', [TenantTelemetrySettingsController::class, 'store'])
+                ->middleware('abilities:telemetry-settings:update');
+            Route::delete('/telemetry/{type}', [TenantTelemetrySettingsController::class, 'destroy'])
+                ->middleware('abilities:telemetry-settings:update');
         });
 });

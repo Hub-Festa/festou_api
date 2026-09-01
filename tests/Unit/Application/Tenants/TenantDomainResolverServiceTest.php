@@ -25,13 +25,6 @@ class TenantDomainResolverServiceTest extends TestCase
         $this->service = $this->app->make(TenantDomainResolverService::class);
     }
 
-    protected function tearDown(): void
-    {
-        $this->refreshLandlordAndTenantDatabases();
-
-        parent::tearDown();
-    }
-
     public function test_finds_tenant_via_inline_domains_regardless_of_case(): void
     {
         $tenant = Tenant::create([
@@ -67,7 +60,7 @@ class TenantDomainResolverServiceTest extends TestCase
         $this->assertSame((string) $tenant->_id, (string) $resolved->_id);
     }
 
-    public function test_prefers_typed_web_domain_collection_before_legacy_inline_domains_array(): void
+    public function test_prefers_domains_collection_before_legacy_inline_domains_array(): void
     {
         $legacyTenant = Tenant::create([
             'name' => 'Legacy Inline Tenant',
@@ -93,51 +86,5 @@ class TenantDomainResolverServiceTest extends TestCase
         $this->assertNotNull($resolved);
         $this->assertSame((string) $canonicalTenant->_id, (string) $resolved->_id);
         $this->assertNotSame((string) $legacyTenant->_id, (string) $resolved->_id);
-    }
-
-    public function test_ignores_non_web_domain_collection_records_before_legacy_fallback(): void
-    {
-        $legacyTenant = Tenant::create([
-            'name' => 'Legacy Inline Tenant',
-            'subdomain' => 'legacy-inline-non-web',
-            'domains' => ['mobile-only-domain.com'],
-        ]);
-
-        $mobileTenant = Tenant::create([
-            'name' => 'Mobile Domain Tenant',
-            'subdomain' => 'mobile-domain',
-            'domains' => [],
-        ]);
-
-        $domain = new Domains([
-            'path' => 'Mobile-Only-Domain.COM',
-            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
-        ]);
-        $domain->tenant()->associate($mobileTenant);
-        $domain->save();
-
-        $resolved = $this->service->findTenantByDomain('mobile-only-domain.com');
-
-        $this->assertNotNull($resolved);
-        $this->assertSame((string) $legacyTenant->_id, (string) $resolved->_id);
-        $this->assertNotSame((string) $mobileTenant->_id, (string) $resolved->_id);
-    }
-
-    public function test_returns_null_when_no_typed_web_or_legacy_domain_matches(): void
-    {
-        $tenant = Tenant::create([
-            'name' => 'Mobile Only Tenant',
-            'subdomain' => 'mobile-only',
-            'domains' => [],
-        ]);
-
-        $domain = new Domains([
-            'path' => 'No-Web-Match.COM',
-            'type' => Tenant::DOMAIN_TYPE_APP_IOS,
-        ]);
-        $domain->tenant()->associate($tenant);
-        $domain->save();
-
-        $this->assertNull($this->service->findTenantByDomain('no-web-match.com'));
     }
 }

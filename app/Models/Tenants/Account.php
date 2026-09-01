@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Models\Tenants;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Traits\OwnRoles;
 use Illuminate\Support\Facades\Context;
 use MongoDB\Laravel\Eloquent\Model;
 use MongoDB\Laravel\Eloquent\SoftDeletes;
+use MongoDB\Laravel\Relations\BelongsTo;
 use MongoDB\Laravel\Relations\HasMany;
 use Spatie\Multitenancy\Models\Concerns\UsesTenantConnection;
 use Spatie\Sluggable\HasSlug;
@@ -15,20 +17,41 @@ use Spatie\Sluggable\SlugOptions;
 
 class Account extends Model
 {
-    use UsesTenantConnection, SoftDeletes, HasSlug, OwnRoles;
+    use HasSlug, OwnRoles, SoftDeletes, UsesTenantConnection;
 
-    static protected string $container_key = 'currentAccount';
+    protected static string $container_key = 'currentAccount';
 
-    static protected string $context_key = 'accountId';
+    protected static string $context_key = 'accountId';
 
     protected $fillable = [
         'name',
+        'slug',
         'document',
+        'ownership_state',
+        'publication',
+        'organization_id',
+        'created_by',
+        'created_by_type',
+        'updated_by',
+        'updated_by_type',
     ];
 
     protected $casts = [
-        'settings' => 'array',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(static function (self $account): void {
+            if ($account->getAttribute('publication') !== null) {
+                return;
+            }
+
+            $account->setAttribute('publication', [
+                'status' => AccountPublicationStateService::PUBLISHED,
+                'publish_at' => null,
+            ]);
+        });
+    }
 
     /**
      * Get the users that belong to this account
@@ -38,15 +61,27 @@ class Account extends Model
         return $this->hasMany(AccountUser::class);
     }
 
-    public function roleTemplates(): HasMany {
+    public function roleTemplates(): HasMany
+    {
         return $this->hasMany(AccountRoleTemplate::class);
+    }
+
+    public function accountProfiles(): HasMany
+    {
+        return $this->hasMany(AccountProfile::class);
+    }
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()
             ->generateSlugsFrom('name')
-            ->saveSlugsTo('slug');
+            ->saveSlugsTo('slug')
+            ->doNotGenerateSlugsOnUpdate();
     }
 
     public function forget(): static
@@ -81,8 +116,8 @@ class Account extends Model
         return $this;
     }
 
-    public function isCurrent(): bool {
+    public function isCurrent(): bool
+    {
         return $this->id === Context::get(static::$context_key);
     }
-
 }

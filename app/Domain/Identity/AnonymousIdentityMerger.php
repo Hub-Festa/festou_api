@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Domain\Identity;
 
+use App\Application\ProximityPreferences\ProximityPreferenceOwnershipService;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
 use App\Models\Landlord\Tenant;
 use App\Models\Tenants\AccountUser;
 use App\Models\Tenants\IdentityMergeAudit;
 use App\Models\Tenants\MergedAccountSnapshot;
+use Belluga\PushHandler\Contracts\PushUserGatewayContract;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -16,8 +18,14 @@ use MongoDB\BSON\ObjectId;
 
 class AnonymousIdentityMerger
 {
+    public function __construct(
+        private readonly ProximityPreferenceOwnershipService $proximityPreferenceOwnershipService,
+        private readonly PushUserGatewayContract $pushUsers,
+    ) {}
+
     /**
-     * @param iterable<AccountUser> $sources
+     * @param  iterable<AccountUser>  $sources
+     *
      * @throws ConcurrencyConflictException|\Throwable
      */
     public function merge(AccountUser $target, iterable $sources, ?string $operatorId = null, string $reason = 'merged'): void
@@ -43,6 +51,9 @@ class AnonymousIdentityMerger
             $fingerprints = Collection::make($target->fingerprints ?? [])
                 ->keyBy(static fn (array $fingerprint): string => (string) ($fingerprint['hash'] ?? spl_object_id((object) $fingerprint)));
 
+            $devices = Collection::make($target->devices ?? [])
+                ->keyBy(static fn (array $device): string => (string) ($device['device_id'] ?? spl_object_id((object) $device)));
+
             $consents = $target->consents ?? [];
             $mergedSourceIds = Collection::make($target->merged_source_ids ?? []);
             $promotionAudit = Collection::make($target->promotion_audit ?? []);
@@ -50,6 +61,7 @@ class AnonymousIdentityMerger
             $mergeAuditSources = Collection::make();
 
             foreach ($sourceCollection as $source) {
+                $source = $this->refreshSource($source);
                 $sourceId = (string) $source->_id;
                 $sourceObjectId = new ObjectId($sourceId);
                 $mergedAt = Carbon::now();
@@ -93,6 +105,12 @@ class AnonymousIdentityMerger
                     $consents = array_replace_recursive($consents, $source->consents);
                 }
 
+                $devices = $this->mergeDevices(
+                    $devices,
+                    $source->devices ?? [],
+                    $now
+                );
+
                 $mergedSourceIds->push($sourceId);
                 $mergeAuditEntry = [
                     'source_user_id' => $sourceObjectId,
@@ -118,6 +136,20 @@ class AnonymousIdentityMerger
                 $source->forceDelete();
             }
 
+            $this->proximityPreferenceOwnershipService->mergeOwnership(
+                targetUserId: (string) $target->_id,
+                sourceUserIds: $sourceCollection->map(
+                    static fn (AccountUser $user): string => (string) $user->_id,
+                )->all(),
+            );
+            $this->pushUsers->reassignPushDevices(
+                targetUserId: (string) $target->_id,
+                sourceUserIds: $sourceCollection->map(
+                    static fn (AccountUser $user): string => (string) $user->_id,
+                )->all(),
+                targetAccountIds: $target->getAccessToIds(),
+            );
+
             $promotionAudit = $promotionAudit
                 ->sortBy(static function (array $entry) use ($now): int {
                     $timestamp = $entry['promoted_at'] ?? null;
@@ -131,6 +163,7 @@ class AnonymousIdentityMerger
 
             $updatePayload = [
                 'fingerprints' => $fingerprints->values()->all(),
+                'devices' => $devices->values()->all(),
                 'consents' => $consents,
                 'merged_source_ids' => $mergedSourceIds->unique()->values()->all(),
                 'promotion_audit' => $promotionAudit->values()->all(),
@@ -193,7 +226,7 @@ class AnonymousIdentityMerger
                     ->first();
 
                 $timelineFirst = $finalFirstSeen ?? $aggregateFirst;
-                $timelineLast = Collection::make([$aggregateLast, $targetFingerprintLastSeen, $this->toCarbon($target->updated_at ?? null)])
+                $timelineLast = Collection::make([$aggregateLast, $targetFingerprintLastSeen])
                     ->filter()
                     ->sortByDesc(static fn (Carbon $timestamp): int => $timestamp->getTimestamp())
                     ->first();
@@ -232,8 +265,67 @@ class AnonymousIdentityMerger
         }
     }
 
+    private function refreshSource(AccountUser $source): AccountUser
+    {
+        return AccountUser::query()->find($source->_id) ?? $source;
+    }
+
     /**
-     * @param Collection<int, array<string, mixed>> $fingerprints
+     * @param  Collection<int, array<string, mixed>>  $devices
+     * @param  array<int, array<string, mixed>>  $sourceDevices
+     */
+    private function mergeDevices(Collection $devices, array $sourceDevices, Carbon $now): Collection
+    {
+        foreach ($sourceDevices as $device) {
+            if (! is_array($device)) {
+                continue;
+            }
+            $deviceId = (string) ($device['device_id'] ?? '');
+            if ($deviceId === '') {
+                continue;
+            }
+            $existing = $devices->get($deviceId);
+            if ($existing === null) {
+                $devices->put($deviceId, $device);
+
+                continue;
+            }
+            $devices->put(
+                $deviceId,
+                $this->resolveLatestDevice($existing, $device, $now)
+            );
+        }
+
+        return $devices;
+    }
+
+    /**
+     * @param  array<string, mixed>  $current
+     * @param  array<string, mixed>  $incoming
+     */
+    private function resolveLatestDevice(array $current, array $incoming, Carbon $now): array
+    {
+        $currentAt = $this->toCarbon($current['updated_at'] ?? $current['created_at'] ?? null);
+        $incomingAt = $this->toCarbon($incoming['updated_at'] ?? $incoming['created_at'] ?? null);
+
+        if ($currentAt === null && $incomingAt === null) {
+            return $incoming;
+        }
+        if ($currentAt === null) {
+            return $incoming;
+        }
+        if ($incomingAt === null) {
+            return $current;
+        }
+        if ($incomingAt->greaterThan($currentAt)) {
+            return $incoming;
+        }
+
+        return $current;
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $fingerprints
      */
     private function resolveFirstSeenAt(Collection $fingerprints, AccountUser $source): ?Carbon
     {
@@ -256,7 +348,7 @@ class AnonymousIdentityMerger
     }
 
     /**
-     * @param Collection<int, array<string, mixed>> $fingerprints
+     * @param  Collection<int, array<string, mixed>>  $fingerprints
      */
     private function resolveLastSeenAt(Collection $fingerprints, AccountUser $source): ?Carbon
     {
@@ -266,26 +358,22 @@ class AnonymousIdentityMerger
             ->sortByDesc(static fn (Carbon $timestamp): int => $timestamp->getTimestamp())
             ->first();
 
-        $identityUpdatedAt = $this->toCarbon($source->updated_at ?? null);
-        if ($identityUpdatedAt === null) {
+        if ($lastFingerprintSeen !== null) {
             return $lastFingerprintSeen;
         }
 
-        if ($lastFingerprintSeen === null || $identityUpdatedAt->greaterThan($lastFingerprintSeen)) {
-            return $identityUpdatedAt;
-        }
-
-        return $lastFingerprintSeen;
+        return $this->toCarbon($source->updated_at ?? null);
     }
 
     /**
-     * @param array<int, array<string, mixed>> $promotionAudit
+     * @param  array<int, array<string, mixed>>  $promotionAudit
      */
     private function resolveRegisteredAt(array $promotionAudit, ?Carbon $currentRegisteredAt): ?Carbon
     {
         $candidates = Collection::make($promotionAudit)
             ->filter(static function (array $entry): bool {
                 $toState = $entry['to_state'] ?? null;
+
                 return in_array($toState, ['registered', 'validated'], true);
             })
             ->map(fn (array $entry): ?Carbon => $this->toCarbon($entry['promoted_at'] ?? null))
@@ -309,6 +397,10 @@ class AnonymousIdentityMerger
 
         if ($value instanceof \DateTimeInterface) {
             return Carbon::instance($value);
+        }
+
+        if ($value instanceof \MongoDB\BSON\UTCDateTime) {
+            return Carbon::instance($value->toDateTime());
         }
 
         if (is_string($value) && $value !== '') {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Application\Identity;
 
+use App\Application\AccountProfiles\AccountProfileBootstrapService;
+use App\Application\Auth\TenantScopedAccessTokenService;
 use App\Domain\Identity\AnonymousIdentityMerger;
 use App\Domain\Identity\PasswordIdentityRegistrar;
 use App\Exceptions\FoundationControlPlane\ConcurrencyConflictException;
@@ -14,15 +16,15 @@ use App\Support\Auth\AbilityCatalog;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
-use Laravel\Sanctum\NewAccessToken;
 use MongoDB\BSON\ObjectId;
-use RuntimeException;
 
 class TenantPasswordRegistrationService
 {
     public function __construct(
         private readonly PasswordIdentityRegistrar $registrar,
         private readonly AnonymousIdentityMerger $identityMerger,
+        private readonly AccountProfileBootstrapService $profileBootstrapper,
+        private readonly TenantScopedAccessTokenService $tenantScopedAccessTokenService,
     ) {}
 
     /**
@@ -32,8 +34,6 @@ class TenantPasswordRegistrationService
      */
     public function register(Tenant $tenant, array $payload): TenantPasswordRegistrationResult
     {
-        $tenantId = $this->tenantId($tenant);
-
         $user = $this->registrar->register([
             'name' => $payload['name'],
             'emails' => [strtolower((string) $payload['email'])],
@@ -83,11 +83,12 @@ class TenantPasswordRegistrationService
             $abilities = [];
         }
 
-        $token = $user->createToken(
+        $token = $this->tenantScopedAccessTokenService->issueForAccountUser(
+            $user,
             'auth:password-register',
-            $this->sanitizeAbilities($abilities)
+            $this->sanitizeAbilities($abilities),
+            (string) $tenant->_id
         );
-        $this->stampTenantId($token, $tenantId);
         $plainToken = $token->plainTextToken;
         $expiresAt = null;
 
@@ -99,6 +100,8 @@ class TenantPasswordRegistrationService
             $accessToken->save();
             $expiresAt = $accessToken->expires_at;
         }
+
+        $this->profileBootstrapper->ensurePersonalAccount($user);
 
         return new TenantPasswordRegistrationResult($user, $plainToken, $expiresAt);
     }
@@ -123,23 +126,6 @@ class TenantPasswordRegistrationService
                 usleep(100_000);
             }
         }
-    }
-
-    private function tenantId(Tenant $tenant): string
-    {
-        $tenantId = trim((string) $tenant->getAttribute('_id'));
-
-        if ($tenantId === '') {
-            throw new RuntimeException('Cannot issue tenant account token without tenant id.');
-        }
-
-        return $tenantId;
-    }
-
-    private function stampTenantId(NewAccessToken $newToken, string $tenantId): void
-    {
-        $newToken->accessToken->setAttribute('tenant_id', $tenantId);
-        $newToken->accessToken->save();
     }
 
     /**

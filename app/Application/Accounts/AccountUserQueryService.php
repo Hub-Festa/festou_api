@@ -7,7 +7,9 @@ namespace App\Application\Accounts;
 use App\Application\Shared\Query\AbstractQueryService;
 use App\Models\Tenants\Account;
 use App\Models\Tenants\AccountUser;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Pagination\LengthAwarePaginator;
+use MongoDB\BSON\ObjectId;
 
 class AccountUserQueryService extends AbstractQueryService
 {
@@ -25,10 +27,43 @@ class AccountUserQueryService extends AbstractQueryService
         );
     }
 
+    public function findByIdForAccountOrFail(Account $account, string $userId): AccountUser
+    {
+        $user = AccountUser::where('_id', new ObjectId($userId))
+            ->where('account_roles.account_id', $account->id)
+            ->first();
+
+        if (! $user) {
+            throw (new ModelNotFoundException)->setModel(AccountUser::class, [$userId]);
+        }
+
+        return $user;
+    }
+
+    public function findByIdOrFail(string $userId): AccountUser
+    {
+        $user = AccountUser::query()
+            ->where('_id', new ObjectId($userId))
+            ->first();
+
+        if (! $user) {
+            throw (new ModelNotFoundException)->setModel(AccountUser::class, [$userId]);
+        }
+
+        return $user;
+    }
+
+    public function findByEmail(string $email): ?AccountUser
+    {
+        return AccountUser::query()
+            ->where('emails', 'all', [strtolower($email)])
+            ->first();
+    }
+
     protected function baseSearchableFields(): array
     {
         return array_diff(
-            (new AccountUser())->getFillable(),
+            (new AccountUser)->getFillable(),
             [
                 'password',
                 'credentials',

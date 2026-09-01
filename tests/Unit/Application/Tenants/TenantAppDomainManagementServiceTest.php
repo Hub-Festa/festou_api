@@ -38,7 +38,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         $this->service = $this->app->make(TenantAppDomainManagementService::class);
     }
 
-    public function testListReturnsTypedTenantAppDomains(): void
+    public function test_list_returns_tenant_app_domains(): void
     {
         $this->tenant->domains()->create([
             'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
@@ -57,7 +57,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         ], $domains);
     }
 
-    public function testUpsertPersistsUniqueDomainPerPlatform(): void
+    public function test_upsert_persists_unique_domain_per_platform(): void
     {
         $domains = $this->service->upsert(
             $this->tenant,
@@ -72,7 +72,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         ], 'landlord');
     }
 
-    public function testUpsertRejectsInvalidFormatForPlatform(): void
+    public function test_upsert_rejects_invalid_format_for_platform(): void
     {
         $this->expectException(ValidationException::class);
         $this->service->upsert(
@@ -82,7 +82,7 @@ class TenantAppDomainManagementServiceTest extends TestCase
         );
     }
 
-    public function testRemoveDeletesExistingDomain(): void
+    public function test_remove_deletes_existing_domain(): void
     {
         $this->tenant->domains()->create([
             'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
@@ -102,10 +102,8 @@ class TenantAppDomainManagementServiceTest extends TestCase
         ], 'landlord');
     }
 
-    public function testRemoveRejectsMissingDomain(): void
+    public function test_remove_rejects_missing_domain(): void
     {
-        $this->tenant->update(['app_domains' => ['present.test']]);
-
         $this->expectException(ValidationException::class);
         $this->service->remove(
             $this->tenant->fresh(),

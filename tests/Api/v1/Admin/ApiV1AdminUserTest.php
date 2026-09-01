@@ -8,8 +8,8 @@ use MongoDB\BSON\ObjectId;
 use Tests\TestCaseAuthenticated;
 use Tests\Traits\SeedsLandlordSupportRoles;
 
-class ApiV1AdminUserTest extends TestCaseAuthenticated {
-
+class ApiV1AdminUserTest extends TestCaseAuthenticated
+{
     use SeedsLandlordSupportRoles;
 
     protected function setUp(): void
@@ -18,7 +18,8 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $this->ensureSupportRoles();
     }
 
-    public function testUserTenantsManagerCreate(): void {
+    public function test_user_tenants_manager_create(): void
+    {
 
         $this->landlord->user_cross_tenant_admin->name = fake()->name();
         $this->landlord->user_cross_tenant_admin->email_1 = fake()->email();
@@ -26,26 +27,26 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $this->landlord->user_cross_tenant_admin->password = fake()->password(8);
 
         $response = $this->userCreate([
-            "name" => $this->landlord->user_cross_tenant_admin->name,
-            "email" => $this->landlord->user_cross_tenant_admin->email_1,
-            "password" => $this->landlord->user_cross_tenant_admin->password,
-            "password_confirmation" => $this->landlord->user_cross_tenant_admin->password,
-            "device_name" => "test",
-            "role_id" => $this->landlord->role_tenants_manager->id,
+            'name' => $this->landlord->user_cross_tenant_admin->name,
+            'email' => $this->landlord->user_cross_tenant_admin->email_1,
+            'password' => $this->landlord->user_cross_tenant_admin->password,
+            'password_confirmation' => $this->landlord->user_cross_tenant_admin->password,
+            'device_name' => 'test',
+            'role_id' => $this->landlord->role_tenants_manager->id,
         ]);
 
         $response->assertStatus(201);
 
         $response->assertJsonStructure([
-            "message",
-            "data" => [
-                "name",
-                "id",
-            ]
+            'message',
+            'data' => [
+                'name',
+                'id',
+            ],
 
         ]);
 
-        $userId = $response->json()['data']["id"];
+        $userId = $response->json()['data']['id'];
         $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $createdUser->identity_state);
         $this->assertNotEmpty($createdUser->credentials);
@@ -62,28 +63,30 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $this->landlord->user_cross_tenant_admin->user_id = $userId;
     }
 
-    public function testUserCreateAgain(): void {
+    public function test_user_create_again(): void
+    {
 
         $response = $this->userCreate([
-            "name" => fake()->name,
-            "email" => $this->landlord->user_cross_tenant_admin->email_1,
-            "password" => $this->landlord->user_cross_tenant_admin->password,
-            "password_confirmation" => $this->landlord->user_cross_tenant_admin->password,
-            "device_name" => "test",
-            "role_id" => $this->landlord->role_tenants_manager->id,
+            'name' => fake()->name,
+            'email' => $this->landlord->user_cross_tenant_admin->email_1,
+            'password' => $this->landlord->user_cross_tenant_admin->password,
+            'password_confirmation' => $this->landlord->user_cross_tenant_admin->password,
+            'device_name' => 'test',
+            'role_id' => $this->landlord->role_tenants_manager->id,
         ]);
 
         $response->assertStatus(422);
 
         $response->assertJsonStructure([
-            "message",
-            "errors" => [
-                "email"
+            'message',
+            'errors' => [
+                'email',
             ],
         ]);
     }
 
-    public function testUserVisitorCreate(): void {
+    public function test_user_visitor_create(): void
+    {
 
         $this->landlord->user_cross_tenant_visitor->name = fake()->name();
         $this->landlord->user_cross_tenant_visitor->email_1 = fake()->email();
@@ -91,26 +94,26 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $this->landlord->user_cross_tenant_visitor->password = fake()->password(8);
 
         $response = $this->userCreate([
-            "name" => $this->landlord->user_cross_tenant_visitor->name,
-            "email" => $this->landlord->user_cross_tenant_visitor->email_1,
-            "password" => $this->landlord->user_cross_tenant_visitor->password,
-            "password_confirmation" => $this->landlord->user_cross_tenant_visitor->password,
-            "device_name" => "test",
-            "role_id" => $this->landlord->role_visitor->id,
+            'name' => $this->landlord->user_cross_tenant_visitor->name,
+            'email' => $this->landlord->user_cross_tenant_visitor->email_1,
+            'password' => $this->landlord->user_cross_tenant_visitor->password,
+            'password_confirmation' => $this->landlord->user_cross_tenant_visitor->password,
+            'device_name' => 'test',
+            'role_id' => $this->landlord->role_visitor->id,
         ]);
 
         $response->assertStatus(201);
 
         $response->assertJsonStructure([
-            "message",
-            "data" => [
-                "name",
-                "id",
-            ]
+            'message',
+            'data' => [
+                'name',
+                'id',
+            ],
 
         ]);
 
-        $userId = $response->json()['data']["id"];
+        $userId = $response->json()['data']['id'];
         $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $createdUser->identity_state);
         $this->assertCount(1, $createdUser->promotion_audit ?? []);
@@ -118,7 +121,8 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $this->landlord->user_cross_tenant_visitor->user_id = $userId;
     }
 
-    public function testUserDisposableCreate(): void {
+    public function test_user_disposable_create(): void
+    {
 
         $this->landlord->user_disposable->name = fake()->name();
         $this->landlord->user_disposable->email_1 = fake()->email();
@@ -126,40 +130,41 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $this->landlord->user_disposable->password = fake()->password(8);
 
         $response = $this->userCreate([
-            "name" => $this->landlord->user_disposable->name,
-            "email" => $this->landlord->user_disposable->email_1,
-            "password" => $this->landlord->user_disposable->password,
-            "password_confirmation" => $this->landlord->user_disposable->password,
-            "device_name" => "test",
-            "role_id" => $this->landlord->role_visitor->id,
+            'name' => $this->landlord->user_disposable->name,
+            'email' => $this->landlord->user_disposable->email_1,
+            'password' => $this->landlord->user_disposable->password,
+            'password_confirmation' => $this->landlord->user_disposable->password,
+            'device_name' => 'test',
+            'role_id' => $this->landlord->role_visitor->id,
         ]);
 
         $response->assertStatus(201);
 
         $response->assertJsonStructure([
-            "message",
-            "data" => [
-                "name",
-                "id",
-            ]
+            'message',
+            'data' => [
+                'name',
+                'id',
+            ],
 
         ]);
 
-        $userId = $response->json()['data']["id"];
+        $userId = $response->json()['data']['id'];
         $createdUser = LandlordUser::where('_id', new ObjectId($userId))->firstOrFail();
         $this->assertEquals('registered', $createdUser->identity_state);
 
         $this->landlord->user_disposable->user_id = $userId;
     }
 
-    public function testUserList(): void {
+    public function test_user_list(): void
+    {
 
         $response = $this->userListUnauthenticated();
 
         $response->assertStatus(401);
 
         $response->assertJsonStructure([
-            "message"
+            'message',
         ]);
 
         $response = $this->userList();
@@ -167,55 +172,66 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         $response->assertStatus(200);
 
         $response_data = $response->json();
-        $this->assertEquals(4, count($response_data['data']));
+        $this->assertNotEmpty($response_data['data']);
         $this->assertArrayHasKey('current_page', $response_data);
         $this->assertArrayHasKey('per_page', $response_data);
+        $this->assertResponseContainsUser($response, $this->landlord->user_superadmin->user_id);
+        $this->assertResponseContainsUser($response, $this->landlord->user_cross_tenant_admin->user_id);
+        $this->assertResponseContainsUser($response, $this->landlord->user_cross_tenant_visitor->user_id);
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
     }
 
-    public function testSoftDelete(): void
+    public function test_soft_delete(): void
     {
         $response = $this->userSoftDelete($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
     }
 
-    public function testListArchived(): void {
+    public function test_list_archived(): void
+    {
         $response = $this->userList();
-        $this->assertEquals(3, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userListArchived();
-        $this->assertEquals(1, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
     }
 
-    public function testUserRestore(): void {
+    public function test_user_restore(): void
+    {
         $response = $this->userRestore($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(4, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
+
+        $response = $this->userListArchived();
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
     }
 
-    public function testUserShow(): void {
+    public function test_user_show(): void
+    {
         $response = $this->userShow($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response->assertJsonStructure([
-            "data" => [
-                "emails",
-                "name",
-                "id",
-                "created_at",
+            'data' => [
+                'emails',
+                'name',
+                'id',
+                'created_at',
             ],
         ]);
     }
 
-    public function testUserUpdate(): void {
+    public function test_user_update(): void
+    {
         $new_name = fake()->name();
 
         $response = $this->userUpdate(
             $this->landlord->user_disposable->user_id,
             [
-                "name" => $new_name,
+                'name' => $new_name,
             ]
         );
 
@@ -229,30 +245,54 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         );
     }
 
-    public function testUserDeleteFlow(): void {
+    public function test_user_delete_flow(): void
+    {
         $response = $this->userList();
-        $this->assertEquals(4, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userSoftDelete($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(3, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userListArchived();
-        $this->assertEquals(1, count($response['data']));
+        $this->assertResponseContainsUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userForceDelete($this->landlord->user_disposable->user_id);
         $response->assertStatus(200);
 
         $response = $this->userList();
-        $this->assertEquals(3, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
 
         $response = $this->userListArchived();
-        $this->assertEquals(0, count($response['data']));
+        $this->assertResponseExcludesUser($response, $this->landlord->user_disposable->user_id);
     }
 
-    protected function userUpdate(string $user_id, array $data): TestResponse {
+    protected function assertResponseContainsUser(TestResponse $response, string $userId): void
+    {
+        $this->assertContains($userId, $this->responseUserIds($response));
+    }
+
+    protected function assertResponseExcludesUser(TestResponse $response, string $userId): void
+    {
+        $this->assertNotContains($userId, $this->responseUserIds($response));
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function responseUserIds(TestResponse $response): array
+    {
+        return collect($response->json('data') ?? [])
+            ->map(fn (array $item): string => (string) ($item['id'] ?? ''))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    protected function userUpdate(string $user_id, array $data): TestResponse
+    {
 
         return $this->json(
             method: 'patch',
@@ -262,7 +302,8 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userShow(string $user_id): TestResponse {
+    protected function userShow(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'get',
             uri: "admin/api/v1/users/$user_id",
@@ -270,7 +311,8 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userRestore(string $user_id): TestResponse {
+    protected function userRestore(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'post',
             uri: "admin/api/v1/users/$user_id/restore",
@@ -278,7 +320,8 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userSoftDelete(string $user_id): TestResponse {
+    protected function userSoftDelete(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'delete',
             uri: "admin/api/v1/users/$user_id",
@@ -286,7 +329,8 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userForceDelete(string $user_id): TestResponse {
+    protected function userForceDelete(string $user_id): TestResponse
+    {
         return $this->json(
             method: 'delete',
             uri: "admin/api/v1/users/$user_id/force_delete",
@@ -294,33 +338,37 @@ class ApiV1AdminUserTest extends TestCaseAuthenticated {
         );
     }
 
-    protected function userListUnauthenticated(): TestResponse {
+    protected function userListUnauthenticated(): TestResponse
+    {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/users",
+            uri: 'admin/api/v1/users',
         );
     }
 
-    protected function userList(): TestResponse {
+    protected function userList(): TestResponse
+    {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/users",
+            uri: 'admin/api/v1/users',
             headers: $this->getHeaders(),
         );
     }
 
-    protected function userListArchived(): TestResponse {
+    protected function userListArchived(): TestResponse
+    {
         return $this->json(
             method: 'get',
-            uri: "admin/api/v1/users?archived=true",
+            uri: 'admin/api/v1/users?archived=true',
             headers: $this->getHeaders(),
         );
     }
 
-    protected function userCreate(array $data): TestResponse {
+    protected function userCreate(array $data): TestResponse
+    {
         return $this->json(
             method: 'post',
-            uri: "admin/api/v1/users",
+            uri: 'admin/api/v1/users',
             data: $data,
             headers: $this->getHeaders(),
         );

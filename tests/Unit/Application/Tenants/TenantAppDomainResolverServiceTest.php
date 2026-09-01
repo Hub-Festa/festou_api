@@ -7,6 +7,7 @@ namespace Tests\Unit\Application\Tenants;
 use App\Application\Initialization\InitializationPayload;
 use App\Application\Initialization\SystemInitializationService;
 use App\Application\Tenants\TenantAppDomainResolverService;
+use App\Models\Landlord\Domains;
 use App\Models\Landlord\Tenant;
 use Tests\TestCase;
 use Tests\Traits\RefreshLandlordAndTenantDatabases;
@@ -32,43 +33,47 @@ class TenantAppDomainResolverServiceTest extends TestCase
         }
 
         $this->tenant = Tenant::query()->firstOrFail();
-        $this->tenant->makeCurrent();
+        Domains::query()
+            ->where('tenant_id', (string) $this->tenant->getKey())
+            ->whereIn('type', [
+                Tenant::DOMAIN_TYPE_APP_ANDROID,
+                Tenant::DOMAIN_TYPE_APP_IOS,
+            ])
+            ->delete();
+        $this->tenant->update([
+            'app_domains' => [],
+        ]);
+
         $this->service = $this->app->make(TenantAppDomainResolverService::class);
     }
 
-    public function testFindTenantByIdentifierResolvesTypedAndroidDomain(): void
+    public function test_find_tenant_by_identifier_resolves_typed_android_domain(): void
     {
-        $this->tenant->domains()->create([
-            'type' => Tenant::DOMAIN_TYPE_APP_ANDROID,
-            'path' => 'com.example.tenant.android',
-        ]);
+        $this->createAppIdentifier(Tenant::DOMAIN_TYPE_APP_ANDROID, 'com.festou.app');
 
-        $resolved = $this->service->findTenantByIdentifier('com.example.tenant.android');
+        $resolved = $this->service->findTenantByIdentifier('com.festou.app');
 
         $this->assertNotNull($resolved);
         $this->assertSame((string) $this->tenant->getKey(), (string) $resolved?->getKey());
     }
 
-    public function testFindTenantByIdentifierResolvesTypedIosDomain(): void
+    public function test_find_tenant_by_identifier_resolves_typed_ios_domain(): void
     {
-        $this->tenant->domains()->create([
-            'type' => Tenant::DOMAIN_TYPE_APP_IOS,
-            'path' => 'com.example.tenant.ios',
-        ]);
+        $this->createAppIdentifier(Tenant::DOMAIN_TYPE_APP_IOS, 'com.festou.ios');
 
-        $resolved = $this->service->findTenantByIdentifier('com.example.tenant.ios');
+        $resolved = $this->service->findTenantByIdentifier('com.festou.ios');
 
         $this->assertNotNull($resolved);
         $this->assertSame((string) $this->tenant->getKey(), (string) $resolved?->getKey());
     }
 
-    public function testFindTenantByIdentifierFallsBackToLegacyAppDomains(): void
+    public function test_find_tenant_by_identifier_falls_back_to_legacy_app_domains(): void
     {
         $this->tenant->update([
-            'app_domains' => ['legacy.example.tenant.app'],
+            'app_domains' => ['legacy.festou.app'],
         ]);
 
-        $resolved = $this->service->findTenantByIdentifier('legacy.example.tenant.app');
+        $resolved = $this->service->findTenantByIdentifier('legacy.festou.app');
 
         $this->assertNotNull($resolved);
         $this->assertSame((string) $this->tenant->getKey(), (string) $resolved?->getKey());
@@ -76,14 +81,13 @@ class TenantAppDomainResolverServiceTest extends TestCase
 
     private function initializeSystem(): void
     {
-        /** @var SystemInitializationService $service */
         $service = $this->app->make(SystemInitializationService::class);
 
         $payload = new InitializationPayload(
             landlord: ['name' => 'Landlord HQ'],
             tenant: ['name' => 'Tenant Theta', 'subdomain' => 'tenant-theta'],
             role: ['name' => 'Root', 'permissions' => ['*']],
-            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'fixture-password-placeholder'],
+            user: ['name' => 'Root User', 'email' => 'root@example.org', 'password' => 'Secret!234'],
             themeDataSettings: [
                 'brightness_default' => 'light',
                 'primary_seed_color' => '#fff',
@@ -91,9 +95,18 @@ class TenantAppDomainResolverServiceTest extends TestCase
             ],
             logoSettings: ['light_logo_uri' => '/logos/light.png'],
             pwaIcon: ['icon192_uri' => '/pwa/icon192.png'],
-            tenantDomains: ['tenant-theta.test']
         );
 
         $service->initialize($payload);
+    }
+
+    private function createAppIdentifier(string $type, string $path): void
+    {
+        $record = new Domains([
+            'type' => $type,
+            'path' => $path,
+        ]);
+        $record->tenant()->associate($this->tenant);
+        $record->save();
     }
 }

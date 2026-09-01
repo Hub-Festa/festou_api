@@ -1,5 +1,6 @@
 <?php
 
+use App\Actions\DomainTenantFinder;
 use App\Models\Landlord\Tenant;
 use Illuminate\Broadcasting\BroadcastEvent;
 use Illuminate\Events\CallQueuedListener;
@@ -9,7 +10,6 @@ use Illuminate\Queue\CallQueuedClosure;
 use Spatie\Multitenancy\Actions\ForgetCurrentTenantAction;
 use Spatie\Multitenancy\Actions\MakeQueueTenantAwareAction;
 use Spatie\Multitenancy\Actions\MakeTenantCurrentAction;
-use App\Actions\DomainTenantFinder;
 
 return [
     /*
@@ -35,7 +35,7 @@ return [
      */
     'switch_tenant_tasks' => [
         // \Spatie\Multitenancy\Tasks\PrefixCacheTask::class,
-         \App\Tasks\SwitchMongoTenantDatabaseTask::class,
+        \App\Tasks\SwitchMongoTenantDatabaseTask::class,
         // \Spatie\Multitenancy\Tasks\SwitchRouteCacheTask::class,
     ],
 
@@ -67,24 +67,14 @@ return [
      */
     'tenant_migration_paths' => [
         'database/migrations/tenants',
-        'packages/shared/favorites/database/migrations',
-        'packages/shared/settings/database/migrations',
-        'packages/shared/push_handler/database/migrations',
+        'packages/belluga/belluga_settings/database/migrations',
+        'packages/belluga/belluga_push_handler/database/migrations',
     ],
 
     /*
      * The connection name to reach the landlord database.
      */
     'landlord_database_connection_name' => env('DB_CONNECTION_LANDLORD', 'landlord'),
-
-    /*
-     * Migration paths to run for landlord database refresh flows that use explicit paths.
-     * Paths are relative to the application base path.
-     */
-    'landlord_migration_paths' => [
-        'database/migrations/landlord',
-        'packages/shared/settings/database/migrations_landlord',
-    ],
 
     /*
      * This key will be used to associate the current tenant in the context

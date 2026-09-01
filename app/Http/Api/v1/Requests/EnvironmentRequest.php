@@ -15,14 +15,13 @@ class EnvironmentRequest extends FormRequest
 
     public function validationData(): array
     {
-        $data = $this->query();
         $headerAppDomain = $this->header('X-App-Domain');
 
-        if (is_string($headerAppDomain) && trim($headerAppDomain) !== '') {
-            $data['app_domain'] = $headerAppDomain;
+        if (is_string($headerAppDomain) && $headerAppDomain !== '') {
+            return ['app_domain' => $headerAppDomain];
         }
 
-        return $data;
+        return [];
     }
 
     public function rules(): array
@@ -45,14 +44,12 @@ class EnvironmentRequest extends FormRequest
     {
         $validator->after(function (Validator $validator): void {
             $appDomain = $this->validated('app_domain');
-
             if (! is_string($appDomain) || trim($appDomain) === '') {
                 return;
             }
 
             $resolver = app(TenantAppDomainResolverService::class);
             $tenant = $resolver->findTenantByIdentifier($appDomain);
-
             if ($tenant !== null) {
                 $this->resolvedAppDomainTenant = $tenant;
 

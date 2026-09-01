@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
-use Illuminate\Contracts\Validation\Validator;
-use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Http\Exceptions\HttpResponseException;
 use App\Support\Validation\InputConstraints;
+use Illuminate\Contracts\Validation\Validator;
+use Illuminate\Http\Exceptions\HttpResponseException;
 
-class ResetPasswordRequestLandlord extends ResetPasswordRequestContract {
-
+class ResetPasswordRequestLandlord extends ResetPasswordRequestContract
+{
     public function authorize(): bool
     {
         return true;
@@ -19,14 +18,8 @@ class ResetPasswordRequestLandlord extends ResetPasswordRequestContract {
     public function rules(): array
     {
         return [
-            'email' => 'required|email|max:' . InputConstraints::EMAIL_MAX,
-            'password' => [
-                'required',
-                'string',
-                'min:' . InputConstraints::PASSWORD_MIN,
-                'max:' . InputConstraints::PASSWORD_MAX,
-                'confirmed',
-            ],
+            'email' => 'required|email|max:'.InputConstraints::EMAIL_MAX,
+            'password' => $this->canonicalPasswordRules(),
             'reset_token' => 'required|string|max:255',
         ];
     }
@@ -34,7 +27,7 @@ class ResetPasswordRequestLandlord extends ResetPasswordRequestContract {
     public function failedValidation(Validator $validator)
     {
         throw new HttpResponseException(response()->json([
-            'errors' => $validator->errors()
+            'errors' => $validator->errors(),
         ], 422));
     }
 }

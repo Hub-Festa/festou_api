@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Api\v1\Requests;
 
+use App\Application\Accounts\AccountPublicationStateService;
 use App\Support\Validation\InputConstraints;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Validator;
 
 class AccountUpdateRequest extends FormRequest
 {
@@ -25,11 +27,42 @@ class AccountUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'name' => 'sometimes|string|max:' . InputConstraints::NAME_MAX,
+            'name' => 'sometimes|string|max:'.InputConstraints::NAME_MAX,
+            'slug' => [
+                'sometimes',
+                'string',
+                'max:'.InputConstraints::NAME_MAX,
+                'regex:/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/',
+            ],
             'document' => 'sometimes|array',
             'document.type' => 'required_with:document.number|string|in:cpf,cnpj',
-            'document.number' => 'required_with:document.type|string|max:' . InputConstraints::NAME_MAX,
+            'document.number' => 'required_with:document.type|string|max:'.InputConstraints::NAME_MAX,
+            'organization_id' => 'sometimes|string|size:'.InputConstraints::OBJECT_ID_LENGTH,
+            'ownership_state' => 'sometimes|string|in:tenant_owned,unmanaged',
+            'publication' => 'sometimes|array',
+            'publication.status' => 'required_with:publication|string|in:'
+                .AccountPublicationStateService::DRAFT.','
+                .AccountPublicationStateService::PUBLISHED,
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if (! $this->exists('publication')) {
+                return;
+            }
+
+            $publication = $this->input('publication');
+            if (! is_array($publication) || array_key_exists('status', $publication)) {
+                return;
+            }
+
+            $validator->errors()->add(
+                'publication.status',
+                'O status da publicação é obrigatório quando publication é enviado.',
+            );
+        });
     }
 
     /**
@@ -43,7 +76,8 @@ class AccountUpdateRequest extends FormRequest
             'document.type.required' => 'O tipo do documento é obrigatório',
             'document.type.in' => 'O tipo do documento deve ser cpf ou cnpj',
             'document.number.required' => 'O número do documento é obrigatório',
-            'document.number.max' => 'O número do documento não pode ter mais que :max caracteres'
+            'document.number.max' => 'O número do documento não pode ter mais que :max caracteres',
+            'slug.regex' => 'O slug deve usar apenas letras minúsculas, números, hífen ou underscore.',
         ];
     }
 }
